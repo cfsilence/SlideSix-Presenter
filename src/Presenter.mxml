@@ -1,0 +1,1676 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:WindowedApplication xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" 
+	showStatusBar="false" showFlexChrome="true" showTitleBar="false" width="100%" height="100%" 
+	creationComplete="init()" xmlns:i="com.slidesix.*" windowComplete="setupKeyListeners(event)" borderStyle="none" xmlns:arc="com.arc90.flexlib.containers.*">
+	<mx:Style source="SunNight.css" />
+	
+	<mx:Script source="com/slidesix/chatLogic.as" />
+	<mx:Script source="com/slidesix/videoLogic.as" />
+	
+	<mx:Script>
+		<![CDATA[
+			import air.update.ApplicationUpdaterUI;
+			import air.update.events.UpdateEvent;
+			
+			import com.adobe.crypto.MD5;
+			import com.adobe.serialization.json.JSON;
+			import com.dgrigg.utils.AsyncJPEGEncoder;
+			import com.slidesix.*;
+			import com.slidesix.help.HelpWindow;
+			import com.slidesix.vo.slideshows.Slide;
+			import com.slidesix.vo.slideshows.Slideshow;
+			import com.slidesix.vo.users.User;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.controls.Image;
+			import mx.events.CloseEvent;
+			import mx.events.CollectionEvent;
+			import mx.events.DragEvent;
+			import mx.events.DynamicEvent;
+			import mx.graphics.codec.PNGEncoder;
+			import mx.managers.CursorManager;
+			import mx.managers.DragManager;
+			import mx.managers.PopUpManager;
+			import mx.messaging.Channel;
+			import mx.rpc.AsyncToken;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.utils.ObjectUtil;
+		
+		[Bindable] [Embed(source = 'assets/no_image.jpg')] public var noImg:Class;
+		[Bindable] [Embed(source = 'assets/no_slide.jpg')] public var noSlide:Class;
+			
+		[Bindable] [Embed(source = 'assets/arrow_left.png')] private var leftArrow:Class;
+		[Bindable] [Embed(source = 'assets/arrow_right.png')] private var rightArrow:Class;
+		[Bindable] [Embed(source = 'assets/cog.png')] private var gearImg:Class;
+		[Bindable] [Embed(source = 'assets/red_ball_15.png')] private var redBall:Class;
+		[Bindable] [Embed(source = 'assets/green_ball_15.png')] private var greenBall:Class;
+		
+		[Bindable] public var baseURL:String;
+		[Bindable] public var updateURL:String;
+		[Bindable] public var userguideURL:String;
+		[Bindable] public var endpointURL:String;
+		[Bindable] public var uploadURL:String;
+		[Bindable] public var pingURL:String;
+		[Bindable] public var twitterServiceURL:String;
+		[Bindable] public var returnType:String = 'xml';
+		[Bindable] public var slideshows:ArrayCollection;
+		[Bindable] public var offlineSlideShows:ArrayCollection;
+		[Bindable] public var slides:ArrayCollection;
+		[Bindable] public var user:User;
+		[Bindable] public var sessionID:String;
+		[Bindable] public var isInFullScreen:Boolean = false;
+		[Bindable] public var initialSlideWidth:Number;
+		[Bindable] public var tweets:ArrayCollection;
+		[Bindable] public var twitterServiceStatus:String = '';
+		[Bindable] public var isListeningToTwitter:Boolean = false;
+		[Bindable] public var uname:String;
+		[Bindable] public var isChatting:Boolean = false;
+		[Bindable] public var notesTextSize:Number;
+		[Bindable] public var isInPresenterMode:Boolean = false;
+		[Bindable] public var screenStreamName:String = '';
+		[Bindable] public var isOnline:Boolean = true;
+		[Bindable] public var isWorkingInOfflineMode:Boolean = false;
+		[Bindable] public var isShowingTweet = false;
+		[Bindable] public var currentVersion:String;
+		[Bindable] public var chatLink:String;
+		[Bindable] public var isShowingPresoURL:Boolean = false;
+		[Bindable] public var remotingChannelSet:ChannelSet;
+			
+		public var host:String;
+		public var prefWindow:PrefWindow;
+		public var helpWindow:HelpWindow;
+		public var offlineSaveProgressWindow:OfflineSaveProgressWindow
+		public var uploadWindow:UploadWindow;
+		public var slideWin:SlideWindow;
+		public var presoWin:PresentationViewWindow;
+		public var twitterTimer:Timer;
+		public var twitterRateLimits:Object;
+		public var maxTweetListSize:Number = 250;
+		public var currentScreen:Object;
+		public var tweetWin:TweetViewWindow;
+		public var prefFile:File;
+		public var offlineSlideShowsFile:File;
+		public var userCredFile:File = File.applicationStorageDirectory.resolvePath('login.s6');
+		public var userCreds:Object;
+		public var screenShareURL:String;
+		public var slideShowIdx:uint; 
+		public var importGatewayConsumer:Consumer;
+		[Bindable] public var importChannelSet:ChannelSet;
+		[Bindable] public var gatewayName:String;
+			
+		/*update related*/
+		public var appUpdater:ApplicationUpdaterUI = new ApplicationUpdaterUI();
+			
+		/*upload related*/
+		public var acceptedExtensions:Array = new Array('ppt', 'pps', 'pdf', 'mov', 'sxi', 'odp', 'moov', 'pdf ', 'sld8', 'sld3');
+		public var maxFileSize:int = 52428800;
+		public var fileToUpload:File = new File();
+		public var fileFilters:Array = new Array();
+		public var fileRefList:FileReferenceList = new FileReferenceList();
+		public var files:Array = new Array();
+		
+		public function init():void {
+			this.maximize();
+			
+			
+			//check for saved credentials
+			if(userCredFile.exists){
+				var stream:FileStream = new FileStream();
+				stream.open(userCredFile, FileMode.READ);
+				userCreds = stream.readObject();
+				stream.close();
+				username.text = userCreds.u;
+				password.text = userCreds.p;
+				if(userCreds.u.length && userCreds.p.length){
+					rememberMe.selected = true;
+				}
+			}
+			/*
+			external dependencies that will be different per client
+			*/
+			host = 'slidesix_commercial'; //change for production
+			
+			baseURL = 'http://' + host + '';
+			updateURL = baseURL + '/index.cfm?event=presenter.xml';
+			uploadURL = baseURL + '/services/slideshows/RemoteSlideshowService.cfc?method=uploadSlideshow';
+			userguideURL = baseURL + '/downloads/SlideSixPresenterUserGuide.pdf';
+			endpointURL = baseURL + '/flex2gateway/';
+			
+			remotingChannelSet = new ChannelSet();
+			var channel:Channel = new AMFChannel('my-cfamf', endpointURL);
+			remotingChannelSet.addChannel(channel);
+			
+				
+			//check network connectivity
+			NativeApplication.nativeApplication.addEventListener(Event.NETWORK_CHANGE, checkNetworkConnection);
+			
+			//check for update
+			setApplicationVersion(); // Find the current version so we can show it below
+            appUpdater.updateURL = updateURL; // Server-side XML file describing update
+            appUpdater.isCheckForUpdateVisible = false; // We won't ask permission to check for an update
+            appUpdater.addEventListener(UpdateEvent.INITIALIZED, onUpdate); // Once initialized, run onUpdate
+            //fail silently on the updater for now
+            //appUpdater.addEventListener(ErrorEvent.ERROR, onError); // If something goes wrong, run onError
+            appUpdater.initialize(); // Initialize the update framework
+			
+			//load up the slidesix crossdomain policies
+			Security.loadPolicyFile(baseURL + '/presentations/crossdomain.xml');
+			Security.loadPolicyFile(baseURL + '/userFiles/crossdomain.xml');
+			
+			pingURL = baseURL + '/index.cfm';
+			
+			/*vid related*/
+			initVideo();
+			
+			//Alert.show(ObjectUtil.toString(availableScreens));
+			twitterTimer = new Timer(48000, 0);
+			twitterTimer.addEventListener(TimerEvent.TIMER, searchTwitter);
+			
+			/*file upload - init drag/drop*/
+            fileFilters.push(new FileFilter('Presentation Files (*.ppt;*.pps;*.pdf;*.odp;*.sxi;*.mov;*)','*.ppt;*.pps;*.pdf;*.odp;*.sxi;*.mov;'));
+            
+            this.addEventListener(Event.CLOSE, appCloseHandler);
+            
+            checkNetworkConnection(new Event(Event.NETWORK_CHANGE));
+			
+		}
+		
+		public function mgmtGatewayHandler(event:MessageEvent):void{
+			var eventMsg:IMessage = event.message;
+			var info:Object = eventMsg.body;
+			switch (info.TYPE) {
+				case 'ImportStatus':
+					var c:Slideshow = info.CONTENT as Slideshow;
+					Alert.show('Presentation Import ('+c.TITLE+') is complete.');
+					for(var s:String in slideshows){
+						var match:Boolean = slideshows[s].ALIAS == c.ALIAS ? true : false;
+						if(match){
+							slideshows.setItemAt(c,s as int);
+							slideshows.refresh();
+							slideShowList.dataProvider.refresh();
+							break;
+						}
+						if(!match && s == (slideshows.length-1).toString()){
+							slideshows.addItemAt(c,0);
+							slideshows.refresh();
+							slideShowList.dataProvider.refresh();
+							break;
+						}
+					}
+					break;
+			}
+		}
+			
+		public function setupKeyListeners(e:Event):void{
+			 /* listen for keyboard events */
+			if(!stage.hasEventListener(KeyboardEvent.KEY_DOWN)){
+	            stage.addEventListener(KeyboardEvent.KEY_DOWN, navKeyHandler);
+	        }
+		}
+		
+		public function navKeyHandler(event:KeyboardEvent):void {
+			//Alert.show(ObjectUtil.toString(event.keyCode));
+			var type:XML = describeType(event.target);
+			var name:String = type.@name;
+			
+			if(name != 'mx.core::UITextField' && name != 'mx.controls::Button' && slideList != undefined && slides != null){
+				if(slideShowList != undefined && slideList != undefined){
+					slideShowList.selectedIndex = slideShowIdx;
+					slideList.setFocus();
+				}
+				switch (event.keyCode) {
+					case Keyboard.P:
+					case Keyboard.BACKSPACE:
+					case Keyboard.DELETE:
+					case Keyboard.UP:
+					case Keyboard.PAGE_UP:
+					case Keyboard.LEFT:
+						navigate('prev');
+						event.stopPropagation();
+						break;
+						
+					case Keyboard.SPACE:
+					case Keyboard.ENTER:
+					case Keyboard.DOWN:
+					case Keyboard.RIGHT:
+					case Keyboard.N:
+					case Keyboard.PAGE_DOWN:
+						navigate('next');
+						event.stopPropagation();
+						break;
+				}
+			}
+				/* if (event.keyCode.toString() == '179') {
+					handlePlayClick();
+				}
+				else if (event.keyCode.toString() == '178') {
+					handleStopClick();
+				} */
+		}
+		
+		public function slideShowKeyDown(e:KeyboardEvent):void{
+			slideShowList.selectedIndex = slideShowIdx;
+			slideList.setFocus();
+			/* 
+			public function KeyboardEvent(type:String, bubbles:Boolean = true, cancelable:Boolean = false, charCodeValue:uint = 0, keyCodeValue:uint = 0, 
+			keyLocationValue:uint = 0, ctrlKeyValue:Boolean = false, altKeyValue:Boolean = false, shiftKeyValue:Boolean = false, 
+			controlKeyValue:Boolean = false, commandKeyValue:Boolean = false)
+			*/
+			stage.dispatchEvent(new KeyboardEvent(KeyboardEvent.KEY_DOWN, true, false, e.charCode, e.keyCode, e.keyLocation, e.ctrlKey, e.altKey, e.shiftKey, e.controlKey, e.commandKey))
+		}
+		
+		public function fixChatPanel():void{
+			if(views.verticalScrollBar != null || (leftSidebar != null && leftSidebar.verticalScrollBar != null)){
+				chatStack.selectedChild = chatContainer;
+			}
+			else{
+				chatStack.selectedChild = chatContainer;
+			}
+		}
+		
+		private function onUpdate(event:UpdateEvent):void {
+            appUpdater.checkNow(); // Go check for an update now
+        }
+
+        // Find the current version for our Label below
+        private function setApplicationVersion():void {
+            var appXML:XML = NativeApplication.nativeApplication.applicationDescriptor;
+            var ns:Namespace = appXML.namespace();
+            currentVersion = appXML.ns::version;
+        }
+		
+		private function checkNetworkConnection(event:Event=null):void{
+ 			var pingRequest:URLRequest = new URLRequest();
+ 			pingRequest.url = pingURL;
+			var connectTest:URLLoader = new URLLoader(pingRequest);
+ 			connectTest.addEventListener(HTTPStatusEvent.HTTP_STATUS, connectHttpStatusHandler);
+ 			connectTest.addEventListener(Event.COMPLETE, connectCompleteHandler);
+ 			connectTest.addEventListener(IOErrorEvent.IO_ERROR, connectErrorHandler); 
+		}
+		
+		private function connectHttpStatusHandler(event:*=null):void{
+			if(event.status == "0"){
+				isOnline = false;
+				isWorkingInOfflineMode = true;
+			}
+			else{
+				isOnline = true
+			}
+		}
+		
+		private function connectErrorHandler(event:IOErrorEvent):void{
+		 isOnline = false;
+		}
+		
+		private function connectCompleteHandler(event:Event):void{
+		 isOnline = true;
+		}
+		
+		public function appCloseHandler(e:Event):void{
+			if(isChatting){
+				logoutChat();
+			}
+			if(slideWin != null){
+				slideWin.close();
+			}
+			if(isBroadcasting){
+				broadcast('stop');
+			}
+			this.close();
+		}
+		
+		public function getPreferences():Object{
+			var stream:FileStream = new FileStream();
+			stream.open(prefFile, FileMode.READ);
+			var ob:Object = stream.readObject();
+			stream.close();
+			return ob;
+		}
+		
+		public function uploadCompleteHandler(e:Event):void{
+			Alert.show('Upload complete.  You will be notified when your presentation has been converted.');
+			//getSlideShows();
+		}
+		
+		public function onBrowse(event:MouseEvent):void {
+			fileToUpload.addEventListener(Event.SELECT, onSelectFile);
+			fileToUpload.browseForOpen('Select Presentation', fileFilters);
+		}
+		public function onSelectFile(e:Event):void{
+			var f:File = e.currentTarget as File;
+			files[0] = f;
+			fileSelected();
+		}
+		
+		/*file upload - drag/drop handlers*/
+		public function initDragDrop():void{
+			top.addEventListener(NativeDragEvent.NATIVE_DRAG_ENTER,onFileDragIn);
+            top.addEventListener(NativeDragEvent.NATIVE_DRAG_DROP,onFileDrop);
+            top.addEventListener(NativeDragEvent.NATIVE_DRAG_EXIT,onFileDragExit);
+            //slideCanvas
+            slideCanvas.addEventListener(DragEvent.DRAG_ENTER,onTweetDragIn);
+            slideCanvas.addEventListener(DragEvent.DRAG_DROP,onTweetDrop);
+            slideCanvas.addEventListener(DragEvent.DRAG_EXIT,onTweetDragExit);
+		}
+		
+		public function fileSelected():void{
+			if(files.length){
+				fileToUpload = files[0] as File;
+				
+				var nArr:Array = fileToUpload.name.split('.');
+				var ext:String;
+		
+				if (fileToUpload.type != null && fileToUpload.type.toUpperCase() != 'NO%F') {
+					if (fileToUpload.type.substr(0,1) == '.') {
+						ext = fileToUpload.type.substr(1, fileToUpload.type.length);
+					}
+					else {
+						ext = fileToUpload.type.replace('.','');
+					}
+				}
+				
+				else {
+					
+					ext = nArr[nArr.length - 1];
+				}
+				
+				var isValidFile:Boolean = acceptedExtensions.indexOf(ext.toLowerCase()) == -1 ? false : true;
+				
+				if (ext.toLowerCase() == 'sld8' && nArr[nArr.length - 1].toLowerCase() == 'pptx') {
+					isValidFile = false;
+				}
+				
+				var isValidSize:Boolean = maxFileSize == 0 || fileToUpload.size < maxFileSize ? true : false;
+					
+				if (isValidFile && isValidSize) {
+					uploadWindow = UploadWindow(PopUpManager.createPopUp(this, UploadWindow, true));
+					uploadWindow.addEventListener('uploadCompleteEvent', uploadCompleteHandler);
+					uploadWindow.uploadURL = uploadURL;
+					uploadWindow.eURL = endpointURL;
+					uploadWindow.rChannelSet = remotingChannelSet;
+					uploadWindow.userID = user.ID;
+					uploadWindow.fileToUpload = fileToUpload;
+					PopUpManager.centerPopUp(uploadWindow);
+				} 
+				else if(!isValidSize){
+					Alert.show("The file (" + fileToUpload.name + ") exceeds the max file size of " + bToMB(maxFileSize), "File Size Error")
+				}
+				else if (!isValidFile){
+					Alert.show('Invalid file type (' + ext + ').  Please try a PowerPoint (PPT, PPS), Acrobat (PDF), or OpenOffice (ODP) file.');
+				}
+			}
+		}
+			
+		public function onTweetDragIn(e:DragEvent):void{
+			DragManager.acceptDragDrop(slideCanvas);
+		}
+		
+		public function onTweetDrop(e:DragEvent):void{
+			var thisTweet:Object = e.dragSource.dataForFormat('items')[0];
+			showTweet(thisTweet);
+		}
+		
+		public function onTweetDragExit(e:DragEvent):void{
+		
+		}
+		
+		public function showTweet(t:Object):void{
+			if(currentScreen != null && isInPresenterMode && slideWin != null){
+				/* tweetWin = TweetViewWindow(PopUpManager.createPopUp(this, TweetViewWindow, false));
+				tweetWin.addEventListener(CloseEvent.CLOSE, function():void{isShowingTweet = false;});
+				tweetWin.height = 400;
+				tweetWin.tweet = t;
+				tweetWin.x = currentScreen.bounds.x + 50;
+				tweetWin.width = currentScreen.bounds.width - 100;
+				tweetWin.y = (currentScreen.bounds.height - tweetWin.height) / 2; */
+				isShowingTweet = true;	
+				slideWin.showPresoURL = false;	
+				isShowingPresoURL = false;
+				slideWin.tweet = t.from_user + ': ' + t.text;
+				slideWin.tweetImg = t.profile_image_url;
+				slideWin.showTweet = true;
+			}
+		}
+		
+		public function hideTweet():void{
+			isShowingTweet = false;		
+			if(slideWin != null){
+				slideWin.showTweet = false;
+			}
+		}
+		
+		public function onFileDragIn(e:NativeDragEvent):void{
+			DragManager.acceptDragDrop(top);
+		}
+		
+		public function onFileDrop(e:NativeDragEvent):void{
+			files = e.clipboard.getData(ClipboardFormats.FILE_LIST_FORMAT) as Array;
+			fileSelected();
+		}
+		
+		public function onFileDragExit(e:NativeDragEvent):void{
+		
+		}
+		
+		public function bToMB(b:int):String {
+			return String(((b/1024)/1024).toFixed(2)) + " mb";
+		}
+		
+		public function openPrefWindow(tab:int):void{
+			prefWindow = PrefWindow(PopUpManager.createPopUp(this, PrefWindow, true));
+			prefWindow.addEventListener(CloseEvent.CLOSE, broadcastOptionsChangedHandler);
+			prefWindow.addEventListener(CloseEvent.CLOSE, notesTextSizeChangedHandler);
+			prefWindow.addEventListener('chatTextSizeChangedEvent', chatTextSizeChangedHandler);
+			prefWindow.addEventListener('needContactWindowEvent', function(e:DynamicEvent):void{
+				openHelpWindow('contact');
+			});
+			prefWindow.uname = uname;
+			prefWindow.userguideURL = userguideURL;
+			prefWindow.currentVersion = currentVersion;
+			prefWindow.prefTabNav.selectedIndex = tab;
+			PopUpManager.centerPopUp(prefWindow);
+		}
+		
+		public function openHelpWindow(topic:String):void{
+			if(helpWindow == null){
+				helpWindow = HelpWindow(PopUpManager.createPopUp(this, HelpWindow, true));
+				//helpWindow.addEventListener('needVideoEvent', getHelpVideo);
+				helpWindow.visible = false;
+			}
+			helpWindow.chatLink = chatLink;
+			helpWindow.contactURL = baseURL + '/index.cfm?event=contact.send';
+			helpWindow.contactFrom = user.FIRSTNAME + ' ' + user.LASTNAME;
+			helpWindow.contactFromID = user.ID;
+			helpWindow.screenShareURL = screenShareURL;
+			helpWindow.userguideURL = userguideURL;
+			var pref:Object = getPreferences();
+			helpWindow.prefFile = prefFile;
+			/*helpWindow.contactFromEmail = currentUser.email; */
+			helpWindow.initialView = topic;
+			helpWindow.visible = true;
+			PopUpManager.centerPopUp(helpWindow);
+			PopUpManager.bringToFront(helpWindow);
+		}
+		
+		public function broadcastOptionsChangedHandler(e:CloseEvent){
+			setUpCamMic();
+		}
+		
+		public function notesTextSizeChangedHandler(e:CloseEvent){
+			var pref:Object = getPreferences();
+			slideNotes.setStyle('fontSize', pref.notesTextSize);
+		}
+		
+		public function chatTextSizeChangedHandler(e:DynamicEvent){
+			//guess what?  flex chokes on this hardcore -- so i'm not doing it for now
+			//instead of changing everything it just changes the last line
+			//var pref:Object = getPreferences();
+			//chatDisplay.setStyle('fontSize', pref.chatTextSize.value);
+		}
+			
+		public function checkLoginEnter(event:KeyboardEvent):void{
+			if (event.keyCode == Keyboard.ENTER){
+				loginUser();
+			}
+		}
+		
+		public function getCurrentUserHandler(e:ResultEvent):void{
+			var r:Object = e.result as Object;
+			sessionID = r.SESSIONID;
+			user = r.USER as User;
+			
+			isWorkingInOfflineMode = false;
+			uname = username.text;
+			chatLink = 'http://' + host + '/collaborate/'+uname;
+			
+			getScreenChannel();
+			setDefaultPrefs();
+			getSlideShows();
+			
+			importChannelSet = new ChannelSet();
+			var mChannel:AMFChannel = new AMFChannel('cf-polling-amf', 'http://' + host + '/flex2gateway/cfamfpolling/;jsessionid='+sessionID);
+			mChannel.enableSmallMessages = false;
+			importChannelSet.addChannel(mChannel);
+			
+			//establish the consumer that will listen for messages sent from coldfusion
+			importGatewayConsumer = new Consumer();
+			importGatewayConsumer.destination = 'ColdFusionGateway';
+			importGatewayConsumer.subtopic = user.ID + '-management_console_gateway';
+			importGatewayConsumer.channelSet = importChannelSet;
+			importGatewayConsumer.addEventListener(MessageEvent.MESSAGE, mgmtGatewayHandler);
+			importGatewayConsumer.subscribe();
+			
+			var pref:Object = getPreferences();
+			if(pref.showHelpAtStart){
+				openHelpWindow('gettingStarted');
+			}
+		}
+			
+		public function getCurrentUser():void{
+			sessionProxyService.getCurrentUser();
+		}
+			
+		public function getGatewayNameHandler(e:ResultEvent):void{
+			gatewayName = e.result as String;
+		}
+			
+		public function authenticateUserHandler(e:ResultEvent):void{
+			var success:Boolean = e.result as Boolean;
+			if(success){
+				getCurrentUser();
+			}
+			else{
+				Alert.show('Login failed.', 'Error');
+			}
+		}
+			
+		public function loginUser():void{
+			var u:String = username.text;
+			var p:String = MD5.hash(password.text);
+			var e:Array = validateLogin(u,p);
+			if(!e.length){
+				var params:Object = new Object();
+				params.u = u;
+				params.p = p;
+				userService.authenticateUser(params);
+				dedicatedRoomProxy.getGatewayName();
+			}
+			else{
+				var msg:String = '';
+				for(var i:String in e){
+					msg += e[i] + '\n';
+				}
+				Alert.show(msg);
+			}
+			
+			var uOb:Object = new Object();
+			
+			if(rememberMe.selected){
+				uOb.u = u;
+				uOb.p = password.text;
+			}
+			else{
+				uOb.u = '';
+				uOb.p = '';
+			}
+			var stream:FileStream = new FileStream();
+			stream.open(userCredFile, FileMode.WRITE);
+			stream.writeObject(uOb);
+			stream.close();
+		}
+		
+		public function workOffline():void{
+			isWorkingInOfflineMode = true;
+			
+			if(!username.text.length){
+				Alert.show('Please enter your username to work offline.');
+			}
+			else{
+				uname = username.text;
+				views.selectedChild = slideView;
+				
+				setDefaultPrefs();
+				
+				var existingShows:ArrayCollection = getOfflineSlideShows();
+				offlineSlideShows = existingShows;
+				
+				if(slideImage != null) slideImage.source = null;
+				slides = null;
+			}
+		}
+		
+		public function getOfflineSlideShows():ArrayCollection{
+			offlineSlideShowsFile = File.applicationStorageDirectory.resolvePath(uname + '/offline-slideshows.s6');
+				
+			if(!offlineSlideShowsFile.exists){
+				var stream:FileStream = new FileStream();
+				stream.open(offlineSlideShowsFile, FileMode.WRITE);
+				stream.writeObject(new ArrayCollection());
+				stream.close();
+			}
+				
+			var stream:FileStream = new FileStream();
+			stream.open(offlineSlideShowsFile, FileMode.READ);
+			var existingShows:ArrayCollection = stream.readObject();
+			stream.close();
+			return existingShows;
+		}
+		
+		public function confirmOffline():void{
+			Alert.show('It may take several minutes to save a presentation to your computer.  You will not be able to work with your slides or presentations until the save is complete.', 'Hold up...', Alert.OK|Alert.CANCEL, this, function(c:CloseEvent):void{
+				if(c.detail==Alert.OK){
+					makeOfflineCheck();
+				}
+			});
+		}
+		
+		public function makeOfflineCheck():void{
+			var alias:String = slideShowList.selectedItem.ALIAS;
+			var offlineSlidesFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' +alias + '.s6');
+			if(offlineSlidesFile.exists){
+				Alert.show('It looks like you\'ve already saved this presentation to your computer.  Should we overwrite it?', 'Sorry to bug you again, but...', Alert.YES|Alert.NO, this, function(e:CloseEvent):void{
+					if(e.detail==Alert.YES){
+						makeOffline();
+					}
+					else{
+						//nothin
+					}
+				});
+			}
+			else{
+				makeOffline();
+			}
+		}
+		public function makeOffline():void{
+			
+			CursorManager.setBusyCursor();
+			
+			var alias:String = slideShowList.selectedItem.ALIAS;
+			var slideShowID:String = slideShowList.selectedItem.ID;
+			
+			var thumb:Image = new Image();
+			thumb.load(slideShowList.selectedItem.PATHTOTHUMB != null ? baseURL + slideShowList.selectedItem.PATHTOTHUMB : 'app://assets/no_slide.jpg');
+			
+			var presoLocalDir:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/thumbs/');
+			var presoThumbFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/thumbs/' + alias + '.png');
+			
+			if(!presoLocalDir.exists){
+				presoLocalDir.createDirectory();
+			}
+			
+			thumb.addEventListener(Event.COMPLETE, function(e:Event){
+				var t:Image = e.target as Image;
+				var tBitmap:Bitmap = t.content as Bitmap;
+				var tBitmapData:BitmapData = tBitmap.bitmapData.clone();
+				
+				var pngEnc:PNGEncoder = new PNGEncoder();
+				var imgByteArray:ByteArray = pngEnc.encode(tBitmapData);
+				
+				var stream:FileStream = new FileStream();
+				stream.open(presoThumbFile, FileMode.WRITE);
+				stream.writeBytes(imgByteArray, 0, imgByteArray.length);
+				stream.close();
+			});
+			
+			saveOfflineSlideShow(alias, currentPresentation, false, presoThumbFile.url);
+			getSlides(true);
+			
+			CursorManager.removeBusyCursor();
+		}
+		
+		public function saveOfflineSlideShow(alias:String = '',title:String = '', isImporting:Boolean = false, thumbPath:String = null):void {
+			top.status = 'Saving Presentation';	
+					
+			var ob:Object = {ALIAS:alias, SLIDESHOWTITLE:title, ISIMPORTING:isImporting, PATHTOTHUMB:thumbPath, SAVEDON:new Date()};
+			var existingShows:ArrayCollection = getOfflineSlideShows();
+			var thisExists:Boolean = false;
+
+			for(var i:int = 0; i < existingShows.length; i++){
+				var existingOb:Object = existingShows.getItemAt(i);
+				if(existingOb.ALIAS == alias){
+					thisExists = true;
+					existingShows.setItemAt(ob, i);
+					break;
+				}
+			}
+			
+			if(!thisExists){
+				existingShows.addItem(ob);
+			}
+			
+			var stream:FileStream = new FileStream();
+			stream.open(offlineSlideShowsFile, FileMode.WRITE);
+			stream.writeObject(existingShows);
+			stream.close();
+			
+			top.status = 'Presentation Saved';
+			
+			var t:Timer = new Timer(5000, 1);
+			t.addEventListener(TimerEvent.TIMER, function(){top.status = '';});
+			t.start();
+		}
+		
+		public function toggleTwitter(listen:Boolean):void{
+			isListeningToTwitter = listen;
+			
+			if(listen){
+				var c:Boolean = isTwitterConfig();
+				var s:String = twitterSearchString.text;
+				if(!c){
+					Alert.show('You haven\'t configured Twitter settings yet', 'Hold up...', 4, this, twitterAlertClosed);
+					isListeningToTwitter = false;
+				}
+				else if(!s.length){
+					Alert.show('Please enter a search string or #hashtag.', 'Hold up...',Alert.OK, this, function():void{
+						twitterSearchString.setFocus();
+					});
+					isListeningToTwitter = false;
+				}
+				else{
+					twitterTimer.start();
+					searchTwitter(new TimerEvent('timer'));
+				}	
+			}
+			else{
+				twitterTimer.stop();
+			}
+		}
+		
+		public function twitterAlertClosed(e:CloseEvent):void{
+			openPrefWindow(0);
+		}
+		
+		public function isTwitterConfig():Boolean{
+			var pref:Object = getPreferences();
+			var tu:String = pref.twitterUsername;
+			var tp:String = pref.twitterPassword;
+			
+			if(!tu.length || !tp.length){
+				return false;
+			}
+			else{
+				return true;
+			}
+		}
+		
+		public var tweetSearchTerm:String = '';
+		
+		public function searchTwitter(e:TimerEvent):void{
+			var pref:Object = getPreferences();
+			var tu:String = pref.twitterUsername;
+			var tp:String = pref.twitterPassword;
+			var s:String = twitterSearchString.text;
+			var params:Object = new Object();
+			params.tu = tu;
+			params.tp = tp;
+			params.search = s;
+			params.rpp = 100;
+			params.method = 'search';
+			params.returnFormat = 'json';
+			//if we have tweets already, just fetch new ones
+			if(tweets != null && s == tweetSearchTerm){
+				params.since_id = tweets[0].id;
+			}
+			
+			if(s.length){
+				tweetSearchTerm = s;
+				twitterServiceStatus = 'Loading Tweets';
+				twitterService.search(params);
+				twitterService.rateLimits(params);
+			}
+			else{
+				Alert.show('Please enter a search string or #hashtag.', 'Hold up...',Alert.OK, this, function():void{
+					twitterSearchString.setFocus();
+				});
+			}
+			
+		}
+		 
+		public function getTwitterSearchHandler(e:ResultEvent):void{
+			var r:Array = new Array();
+			try{
+				r = e.result as Array;
+			}
+			catch(e:Error){
+				//trace(e.message);
+			}
+			twitterServiceStatus = r.length + ' Tweets Loaded';
+			var t:Timer = new Timer(5000, 1);
+			t.addEventListener(TimerEvent.TIMER, clearTwitterStatus);
+			t.start();
+			
+			if(tweets == null){
+				tweets = new ArrayCollection(r);
+			}
+			else if (r.length){
+				r.reverse().forEach(function(e:*, index:int, arr:Array):void{
+					tweets.addItemAt(e,0);
+					if(tweets.length > maxTweetListSize){
+						tweets.removeItemAt(tweets.length - 1);
+					}
+				});
+			}
+		}
+			
+		public function getTwitterRateLimitsHandler(e:ResultEvent):void{
+			twitterRateLimits = e.result;
+			// inlimit and remaining are the keys to the rate limit object
+		}
+			
+		public function clearTwitterStatus(e:TimerEvent):void{
+			twitterServiceStatus = '';
+		}
+		
+		public function getScreenChannel():void{
+			dedicatedRoomProxy.getScreenChannel(uname);	
+		}
+		
+		public function getScreenChannelHandler(e:ResultEvent):void{
+			screenStreamName = String(e.result);
+			screenShareURL = baseURL + '/index.cfm?event=screenshare.generateXML&room=' + uname + '&channelID=' + screenStreamName;
+			if(helpWindow != null){
+				helpWindow.screenShareURL = screenShareURL;
+			}
+		}
+		
+		public function getSlideshowsHandler(e:ResultEvent):void{
+			slideshows = new ArrayCollection();
+			var x:Array = e.result as Array;
+			for(var ss:String in x){
+				var s:Slideshow = x[ss] as Slideshow;
+				slideshows.addItem(s);
+			}
+			views.selectedChild = slideView;
+		}
+			
+		
+		public function setDefaultPrefs():void{
+			prefFile = File.applicationStorageDirectory.resolvePath(uname + '/user-preferences.s6');
+			var pref:Object;
+			
+			if(!prefFile.exists){
+            	var rObj:Object = new Object();
+				rObj.twitterUsername = '';
+				rObj.twitterPassword = '';
+				rObj.preferredCamera = 0;
+				rObj.preferredMicrophone = 0;
+				rObj.notesTextSize = 12;
+				rObj.preferredMonitor = 0;
+				rObj.showHelpAtStart = true;
+				var stream:FileStream = new FileStream();
+				stream.open(prefFile, FileMode.WRITE);
+				stream.writeObject(rObj);
+				stream.close();
+				
+            }
+            pref = getPreferences();
+            notesTextSize = pref.notesTextSize;
+		}
+		
+		public function getSlideShows():void{
+			slideShowService.listSlideshowsByUserID(user.ID,'createdOn desc');
+		}
+		
+		public function getSlides(forCaching:Boolean = false):void{
+			slideShowIdx = slideShowList.selectedIndex;
+			hideTweet();
+			var alias:String = slideShowList.selectedItem.ALIAS;
+			currentPresentation = slideShowList.selectedItem.TITLE;
+
+			if(isOnline && !isWorkingInOfflineMode){
+				var token:AsyncToken = slideShowService.listSlidesBySlideshowID(slideShowList.selectedItem.ID);
+				token.forCaching = forCaching;
+				token.alias = alias;
+				views.selectedChild = slideView;
+			}
+			else{
+				var offlineSlidesFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '.s6');
+				
+				if(offlineSlidesFile.exists){
+					var stream:FileStream = new FileStream();
+					stream.open(offlineSlidesFile, FileMode.READ);
+					var ob:Object = stream.readObject();
+					stream.close();
+					slides = ob as ArrayCollection;
+					slideList.selectedIndex = 0;
+					setPresentationSlide();
+					bottom.height = 177;
+				}
+				else{
+					Alert.show('Offline file not found', '404...');
+				}
+			}
+			
+		}
+		
+		public var offlineFileQueue:ArrayCollection;
+		
+		public function getSlidesHandler(e:ResultEvent):void{
+			var forCaching:String = e.token.forCaching;
+			var x:XML = XML(e.result);
+			if(isOnline){
+				if(forCaching.toLowerCase() == 'false'){
+					slides = new ArrayCollection();
+					var sl:Array = e.result as Array;
+					for(var s:String in sl){
+						var thisSlide:Slide = sl[s] as Slide;
+						slides.addItem(thisSlide);
+					}
+					/* var s:XMLList = x.slides.slide;
+					var item:XML;
+					
+					for each(item in s) {
+						var path:String = item.PATHTOSLIDE;
+						item.PATHTOSLIDE = baseURL + path;
+					} */
+					slideList.selectedIndex = 0;
+					setPresentationSlide();
+					bottom.height = 177;
+				}
+				else{
+					
+					var xSlides:ArrayCollection = new ArrayCollection();
+					var slds:Array = e.result as Array;
+					for(var s:String in slds){
+						var thisSlide:Slide = slds[s] as Slide;
+						xSlides.addItem(thisSlide);
+					}
+					
+					var alias:String = slideShowList.selectedItem.ALIAS;
+					
+					var offlineSlidesFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '.s6');
+					
+					var presoLocalThumbDir:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/thumbs/');
+					var presoLocalSlideDir:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/slides/');
+					
+					if(!presoLocalSlideDir.exists){
+						presoLocalSlideDir.createDirectory();
+					}
+					
+					var thumb:Image;
+					var slide:Slide;
+					
+					offlineFileQueue = new ArrayCollection();
+					
+					offlineFileQueue.addEventListener(CollectionEvent.COLLECTION_CHANGE, function(){
+						if(offlineSaveProgressWindow != null){
+							offlineSaveProgressWindow.offlineFileQueue = offlineFileQueue;
+						}
+					});
+					
+					for each(slide in xSlides) {
+						var downloadParams:Object = new Object();
+						downloadParams.alias = alias;
+						
+					    var thumb:Image = new Image();
+					    thumb.addEventListener(Event.COMPLETE,function(e:Event):void{thumbDownloadHandler(e,downloadParams);});
+						thumb.load(baseURL + slide.PATHTOSLIDETHUMB);
+						
+						var slideSourcePath:String = baseURL + slide.PATHTOSLIDE;
+						var tURLArr:Array = slideSourcePath.split('/');
+						var sURLArr:Array = slideSourcePath.split('/');
+						var tFileName:String = tURLArr[tURLArr.length - 1].toLowerCase().replace('.jpg', '') + '_thumb.png';						
+						var sFileName:String = sURLArr[sURLArr.length - 1];						
+						var tLocalFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/thumbs/' + tFileName);
+						var slideLocalFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + alias + '/slides/' + sFileName.toLowerCase()); //.replace('.jpg', '.png'))
+						var slideImg:Image = new Image();
+						var offlineFileDownload:Object = {file: 'Slide ' + slide.SLIDENUMBER, dBytesLoaded: 0, dBytesTotal: 0, eBytesLoaded: 0, eBytesTotal: 0, url: slideSourcePath, localURL: slideLocalFile.url};
+						
+						offlineFileQueue.addItem(offlineFileDownload);
+
+						slideImg.addEventListener(ProgressEvent.PROGRESS, slideProgressHandler);
+						slideImg.addEventListener(Event.COMPLETE,function(e:Event):void{slideDownloadHander(e,downloadParams);});
+						slideImg.load(slideSourcePath);
+						
+						/* var slideLocalPath:XML = <slideLocalPath />;
+						slideLocalPath.appendChild(slideLocalFile.url)
+						item.appendChild(slideLocalPath); */
+						slide.PATHTOSLIDE = slideLocalFile.url;
+						slide.PATHTOSLIDETHUMB = tLocalFile.url;
+					}
+					
+					offlineSaveProgressWindow = OfflineSaveProgressWindow(PopUpManager.createPopUp(this, OfflineSaveProgressWindow, true));
+					offlineSaveProgressWindow.offlineFileQueue = offlineFileQueue;
+					if(!offlineSaveProgressWindow.hasEventListener(CloseEvent.CLOSE)){
+						offlineSaveProgressWindow.addEventListener(CloseEvent.CLOSE, function():void{
+							Alert.show('Presentation has been saved to your computer.', 'Yo...');
+						});
+					}
+					PopUpManager.centerPopUp(offlineSaveProgressWindow);
+					
+		            //save slide xml
+		            var sStream:FileStream = new FileStream();
+					sStream.open(offlineSlidesFile, FileMode.WRITE);
+					sStream.writeObject(xSlides);
+					sStream.close();
+					
+				}
+			}
+		}
+		
+		public function thumbDownloadHandler(e:Event,params:Object):void{
+			
+			var uArr:Array = e.currentTarget.source.split('/');
+			var fName:String = uArr[uArr.length - 1];
+			fName = fName.toLowerCase().replace('.jpg', '.png');
+			var tFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + params.alias + '/thumbs/' + fName);
+			
+			var t:Image = e.target as Image;
+			var tBitmap:Bitmap = t.content as Bitmap;
+			var tBitmapData:BitmapData = tBitmap.bitmapData.clone();
+			
+			var pngEnc:PNGEncoder = new PNGEncoder();
+			var imgByteArray:ByteArray = pngEnc.encode(tBitmapData);
+			var tStream:FileStream = new FileStream();
+        	tStream.open(tFile, FileMode.WRITE);
+			tStream.writeBytes(imgByteArray, 0, imgByteArray.length);
+			tStream.close();
+		}
+		
+		public function slideProgressHandler(e:ProgressEvent):void{
+			var idx:Number;
+			
+			for (var i:Number = 0; i < offlineFileQueue.length; i++) {
+				if (offlineFileQueue[i].url == e.currentTarget.source) {
+					idx = i;
+					break;
+				}
+			}
+			var ob:Object = offlineFileQueue.getItemAt(idx);
+			ob.dBytesLoaded = e.bytesLoaded;
+			ob.dBytesTotal = e.bytesTotal;
+			offlineFileQueue.setItemAt(ob, idx);
+		}
+		
+		public function slideDownloadHander(e:Event,params:Object):void{
+			
+			var uArr:Array = e.currentTarget.source.split('/');
+			var fName:String = uArr[uArr.length - 1];
+			//fName = fName.toLowerCase().replace('.jpg', '.png');
+			var sFile:File = File.applicationStorageDirectory.resolvePath(uname + '/' + params.alias + '/slides/' + fName);
+			var t:Image = e.target as Image;
+			var tBitmap:Bitmap = t.content as Bitmap;
+			var tBitmapData:BitmapData = tBitmap.bitmapData.clone(); 
+			//var pngEnc:PNGEncoder = new PNGEncoder();
+			
+			//var imgByteArray:ByteArray = pngEnc.encode(tBitmapData);
+			
+			var j:AsyncJPEGEncoder = new  AsyncJPEGEncoder(90);
+			j.imgFileName = sFile.url;
+		   	j.addEventListener('encodeProgress', jpegProgressHandler);
+		   	j.addEventListener('encodeComplete', jpegComplete);
+		
+		   	var byte:ByteArray = j.encode(tBitmapData); 
+   
+		}
+		 
+		public function jpegProgressHandler(e:DynamicEvent):void{
+			var idx:Number;
+			if(e.imgFileName != undefined){
+				for (var i:Number = 0; i < offlineFileQueue.length; i++) {
+					if (offlineFileQueue[i].localURL.toLowerCase() == e.imgFileName.toLowerCase()) {
+						idx = i;
+						break;
+					}
+				}
+				var ob:Object = offlineFileQueue.getItemAt(idx);
+				ob.eBytesLoaded = e.bytesLoaded;
+				ob.eBytesTotal = e.bytesTotal;
+				offlineFileQueue.setItemAt(ob, idx);
+			}
+		}
+		
+		public function jpegComplete(e:DynamicEvent):void{
+			var imgByteArray:ByteArray = e.bytes;
+			var stream:FileStream = new FileStream();
+			var sFile:File = new File(e.imgFileName);
+			stream.addEventListener(OutputProgressEvent.OUTPUT_PROGRESS, streamProgressHandler);
+			stream.openAsync(sFile, FileMode.WRITE);
+			stream.writeBytes(imgByteArray, 0, imgByteArray.length);
+		}
+		
+		public function streamProgressHandler(e:OutputProgressEvent):void{
+			var idx:Number;
+			/* trace('bPen len ' + e.bytesPending.toString());
+			trace('bTot len ' + e.bytesTotal.toString()); */
+			
+			if(e.bytesPending == 0){
+				e.target.close();
+			}
+			//trace(offlineFileQueue[i].localURL);
+			/* for (var i:Number = 0; i < offlineFileQueue.length; i++) {
+				if (offlineFileQueue[i].localURL == e.currentTarget.url) {
+					idx = i;
+					break;
+				}
+			} */
+			
+			/* var ob:Object = offlineFileQueue.getItemAt(idx);
+			ob.sBytesPending = e.bytesPending;
+			ob.sBytesTotal = e.bytesTotal;
+			offlineFileQueue.setItemAt(ob, idx); */
+		}
+		
+		public function faultHandler(e:FaultEvent):void{
+			Alert.show('An unexpected error has occurred.', 'Error!!');
+			trace(e);
+		}
+		
+		public function validateLogin(u:String,p:String):Array{
+			var e:Array = new Array();
+			if(!u.length){
+				e.push('Username is required');
+			}
+			if(!p.length){
+				e.push('Password is required');
+			}
+			return e;
+		}
+		public function navigate(dir:String):void{
+			var i:Number;
+			switch(dir){
+				case 'prev':
+					if (slideList.selectedIndex > 0) {
+						i = slideList.selectedIndex - 1;
+					}
+					break;
+				case 'next':
+					if (slideList.selectedIndex < slides.length - 1) {
+						i = slideList.selectedIndex + 1;
+					}
+					break;
+				case 'first':
+					i = 0;
+					break;
+				case 'last':
+					i = slideList.dataProvider.length - 1;
+					break;
+			}
+			if(!isNaN(i)){
+				slideList.selectedIndex = i;
+				slideList.scrollToIndex(i);
+				setPresentationSlide();
+			}
+		}
+		
+		public function setPresentationSlide():void{
+			var slide:String
+			
+			slide = isWorkingInOfflineMode ? slideList.selectedItem.PATHTOSLIDE : baseURL + slideList.selectedItem.PATHTOSLIDE;
+			if(slideWin != null){
+				slideWin.imgSrc = slide;
+				slideWin.presoURL = baseURL + '/view/' + slideShowList.selectedItem.ALIAS;	
+			}
+			
+			slideImage.source = slide;
+			
+			broadcastSlideChange();
+		}
+		
+		public function broadcastSlideChange():void{
+			var slide:String = slideList.selectedItem.PATHTOSLIDE;
+			if(isChatting){
+				var msg:AsyncMessage = new AsyncMessage();
+				var d:Date = new Date();
+				msg.headers.gatewayid = gatewayName;
+				msg.body = {slide:slide, timestamp: d, room: room, userid:user.ID, isBroadcasting: isBroadcasting, presentation: currentPresentation};
+				producer.subtopic = slideChangedSubtopic;
+				producer.send(msg);
+				var s:Number = slideList.selectedIndex + 1;
+				var c:String =  getUserTimeStamp() + '<i>[switched to slide ' + s + ']</i>';
+				chatDisplay.htmlText += c + '<br>';
+				sendChat(c);
+			}
+		}
+		
+		public function fixImg(e:Event):void{
+			var cW:Number = slideImage.contentWidth;
+			var cH:Number = slideImage.contentHeight;
+			var nT:Number = (slideCanvas.height - cH) / 2;
+			var nL:Number = (slideCanvas.width - cW) / 2;
+			if(cW > 0 && cH > 0){
+				if(slideImgContainer.getStyle('top') != nT){
+					slideImgContainer.setStyle('top', nT);
+				}
+				if(slideImgContainer.getStyle('left') != nL){
+					slideImgContainer.setStyle('left', nL);
+				}
+			}
+		}
+		 
+		public function openPresenterView():void{
+			if(isInPresenterMode){
+				slideWin.close();
+				isInPresenterMode = false;
+				isShowingTweet = false;
+			}
+			else{
+				openScreenSelectWindow();
+			}
+		}
+		
+		public function togglePresoURL():void{
+			if(slideWin != null){
+				isShowingPresoURL = !isShowingPresoURL;
+				slideWin.showPresoURL = isShowingPresoURL;
+			}
+		}
+		
+		public function openScreenSelectWindow():void{
+			var screenSelectWindow:ScreenSelectWindow = ScreenSelectWindow(PopUpManager.createPopUp(this, ScreenSelectWindow, true));
+			if(!screenSelectWindow.hasEventListener('screenSelectedEvent')){
+				screenSelectWindow.addEventListener('screenSelectedEvent', handleScreenSelected);
+			}
+			PopUpManager.centerPopUp(screenSelectWindow);
+		}
+		
+		public function handleScreenSelected(e:DynamicEvent):void{
+			var s:Number = e.screen;
+			var screen:Object = currentScreen = Screen.screens[s];
+			
+			slideWin = new SlideWindow();
+			slideWin.presoURL = baseURL + '/view/' + slideShowList.selectedItem.ALIAS;
+			slideWin.showTitleBar = false;
+			slideWin.showStatusBar = false;
+			slideWin.width = screen.bounds.width;
+			slideWin.height = screen.bounds.height;
+			slideWin.systemChrome = 'none';
+			//slideWin.transparent = true;  
+			setPresentationSlide();
+			slideWin.open();
+			slideWin.move(screen.bounds.x,screen.bounds.y);
+			slideWin.stage.displayState = StageDisplayState.FULL_SCREEN_INTERACTIVE;
+			isInPresenterMode = true;
+		}
+		
+		public function openPresentation():void{
+			presoWin = new PresentationViewWindow();
+			presoWin.showTitleBar = false;
+			presoWin.showStatusBar = false;
+			presoWin.width = 550;
+			presoWin.height = 425;
+			presoWin.resizable = false;
+			presoWin.open();
+			presoWin.presoSource = slideShowList.selectedItem.EMBEDCODE;
+		}
+		
+		public function toggleSideBar(whichOne:String):void{
+			if(whichOne	== 'left'){
+				if(isOnline){
+					leftSidebar.width == 300 ? leftSidebar.width = 0 : leftSidebar.width = 300;
+				}
+			}		
+			else if(whichOne == 'right'){
+				rightSidebar.width == 300 ? rightSidebar.width = 0 : rightSidebar.width = 300;
+			}
+			fixChatPanel();
+		}
+		
+		public function toggleTopBottomBar(whichOne:String):void{
+			if(whichOne	== 'top'){
+				top.height == 177 ? top.height = 0 : top.height = 177;
+			}		
+			else if(whichOne == 'bottom'){
+				bottom.height == 177 ? bottom.height = 0 : bottom.height = 177;
+			}
+		}
+		
+		public function scrollChat():void{
+			chatDisplay.verticalScrollPosition = chatDisplay.maxVerticalScrollPosition;
+		}
+		
+		public function joinChat():void{
+			isChatting = true;
+			initChat();
+			chatPanel.status = 'Logging into chat';
+		}
+		
+		public function exitChat():void{
+			logoutChat();
+			isChatting = false;
+			chatPanel.status = 'Logged out of chat';
+			usersInThisRoom = null;
+			chatDisplay.text = '';
+			chatInput.text = '';
+			var t:Timer = new Timer(5000, 1);
+			t.addEventListener(TimerEvent.TIMER, function():void{chatPanel.status = '';});
+			t.start();	
+		}
+		
+		public function copyChatURL(e:MouseEvent):void{
+			System.setClipboard(chatLink);
+			Alert.show('Link (' + chatLink + ') has been copied to your clipboard', 'Yo!');
+		}
+		
+		public function yesNoFormat(b:Boolean):String{
+			return b ? 'Yes' : 'No';
+		}
+		
+		public function confirmAppExit():void{
+			if(isInPresenterMode || isChatting || isBroadcasting){
+				Alert.show('Are you sure you want to exit?', 'Hold up...', Alert.YES|Alert.NO, this, function(e):void{
+					if(e.detail == Alert.YES){
+						appCloseHandler(new Event(Event.CLOSE));
+					}
+				});
+			}
+			else{
+				appCloseHandler(new Event(Event.CLOSE));
+			}
+		}
+		
+		public function goLink(u:String):void {
+			var urlRequest:URLRequest = new URLRequest(u);
+			navigateToURL(urlRequest, '_blank');	
+		}
+		]]>
+	</mx:Script>
+	
+	<mx:Resize duration="500" id="r1" />
+	<mx:Resize duration="500" id="r2" />
+	
+	<mx:RemoteObject channelSet="{remotingChannelSet}" id="sessionProxyService" endpoint="{endpointURL}" destination="ColdFusion" source="services.users.SessionProxy" showBusyCursor="true">
+		<mx:method name="getCurrentUser" result="getCurrentUserHandler(event)" fault="faultHandler(event)" />
+	</mx:RemoteObject>
+	
+	<mx:RemoteObject channelSet="{remotingChannelSet}" id="userService" endpoint="{endpointURL}" destination="ColdFusion" source="services.users.RemoteUserService" showBusyCursor="true">
+		<mx:method name="authenticateUser" result="authenticateUserHandler(event)" fault="faultHandler(event)" />
+	</mx:RemoteObject>
+	
+	<mx:RemoteObject channelSet="{remotingChannelSet}" endpoint="{endpointURL}" id="slideShowService" destination="ColdFusion" source="services.slideshows.RemoteSlideShowService" showBusyCursor="true">
+		<mx:method name="listSlideshowsByUserID" result="getSlideshowsHandler(event)" fault="faultHandler(event)" />		
+		<mx:method name="listSlidesBySlideshowID" result="getSlidesHandler(event)" fault="faultHandler(event)" />		
+		<!--<mx:method name="saveSlideshowInfo" result="saveSlideshowInfoHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="deleteAttachment" result="deleteAttachmentHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="listCommentsBySlideshowID" result="listCommentsBySlideshowIDHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="deleteCommentByID" result="deleteCommentByIDHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="deleteSlideshowByID" result="deleteSlideshowByIDHandler(event)" fault="faultHandler(event)" />-->
+	</mx:RemoteObject>
+	
+	<mx:RemoteObject channelSet="{remotingChannelSet}" id="dedicatedRoomProxy" endpoint="{endpointURL}" destination="ColdFusion" source="services.eventGateways.dedicatedRoom.DedicatedRoomProxy" showBusyCursor="true">
+		<mx:method name="getScreenChannel" result="getScreenChannelHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="getGatewayName" result="getGatewayNameHandler(event)" fault="faultHandler(event)" />
+	</mx:RemoteObject>
+
+	<mx:RemoteObject channelSet="{remotingChannelSet}" id="twitterService" endpoint="{endpointURL}" destination="ColdFusion" source="services.twitter.RemoteTwitterService" showBusyCursor="false">
+		<mx:method name="search" result="getTwitterSearchHandler(event)" fault="faultHandler(event)" />
+		<mx:method name="rateLimits" result="getTwitterRateLimitsHandler(event)" fault="faultHandler(event)" />
+	</mx:RemoteObject>
+	
+	<!--<mx:TitleWindow id="applicationContainer" width="100%" height="100%" title="SlideSix Presenter - {views.selectedChild.label}" showCloseButton="true" close="this.close()" paddingBottom="5" paddingLeft="5" paddingRight="5" paddingTop="5">-->
+		<mx:ViewStack id="views" width="100%" height="100%">
+			<mx:VBox id="loginView" width="100%" height="100%" horizontalAlign="center" verticalAlign="middle" label="Login">
+				<mx:Panel width="384" height="230" title="Sign In To Your SlideSix Account" id="loginPanel" status="{'Version: ' + currentVersion}" verticalAlign="middle">
+					<mx:VBox id="loginForm" width="100%" paddingBottom="10" paddingLeft="10" paddingTop="10" paddingRight="10">
+						<mx:HBox width="100%">
+							<mx:Text text="Username" width="86" textAlign="right" fontSize="16" />
+							<mx:TextInput id="username" width="75%" text="" fontSize="16" keyUp="checkLoginEnter(event)" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Text text="Password" width="86" textAlign="right" fontSize="16"/>
+							<mx:TextInput displayAsPassword="true" id="password" width="75%" text="" fontSize="16" keyUp="checkLoginEnter(event)" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Text text="" width="86" textAlign="right" fontSize="16"/>
+							<mx:CheckBox id="rememberMe" label="Remember My Login Info" toolTip="Check to save your login info on this computer" />
+						</mx:HBox>
+					</mx:VBox>
+					<mx:ControlBar horizontalAlign="center" paddingLeft="15" paddingRight="15">
+						<mx:HBox width="100%" horizontalAlign="center">
+							<mx:Button id="login" width="75%" label="Login" click="loginUser()" enabled="{isOnline}" toolTip="{isOnline ? '' : 'No internet connection detected.  Try working offline.'}" />
+							<mx:Button label="Work Offline" width="25%" click="workOffline()" />
+						</mx:HBox>
+					</mx:ControlBar>
+				</mx:Panel>
+			</mx:VBox>
+			
+			<mx:VBox id="slideView" width="100%" height="100%" label="{currentPresentation}" show="initDragDrop()" verticalGap="0">
+				<mx:VBox height="20" maxHeight="20" width="100%" backgroundColor="#111111" borderStyle="solid" borderColor="#1C1C1C" borderThickness="1" horizontalAlign="center" verticalAlign="middle" click="toggleTopBottomBar('top')">
+					<mx:Image source="{top.height &gt; 0 ? leftArrow : rightArrow}" rotation="90" styleName="slideImage" />
+				</mx:VBox>
+				<mx:Panel title="{slideShowList.dataProvider.length.toString() != '0' ? 'Presentations (Double Click To Open)' : 'Presentations'}" id="top" width="100%" resizeEffect="Resize">
+					<mx:HBox width="100%" verticalAlign="middle" id="slideShowContainer">
+						
+						<mx:TileList 
+							id="slideShowList" 
+							dataProvider="{!isWorkingInOfflineMode ? slideshows : offlineSlideShows}" 
+							visible="{(!isWorkingInOfflineMode &amp;&amp; slideshows.length &gt; 0) || (isWorkingInOfflineMode &amp;&amp; offlineSlideShows.length &gt; 0) ? true : false}" 
+							rowCount="1" 
+							percentWidth="{slideShowList.visible ? 100 : 0}" 
+							height="120" 
+							direction="vertical" 
+							doubleClickEnabled="true" 
+							doubleClick="getSlides()" focusIn="slideShowIdx = slideShowList.selectedIndex;" keyDown="slideShowKeyDown(event)">
+							<mx:itemRenderer> 
+				                <mx:Component> 
+				   	                 <mx:VBox horizontalAlign="center" width="140" height="100" verticalAlign="middle" toolTip="{data.TITLE}"> 
+				   	                        <mx:HBox width="100%" height="100%" horizontalAlign="center" verticalAlign="middle">
+				   	                        	<i:SmoothImage
+													source="{data.PATHTOTHUMB != null ? (parentApplication.isWorkingInOfflineMode ? data.PATHTOTHUMB : parentApplication.baseURL + data.PATHTOTHUMB) : parentApplication.noSlide}" height="90" width="120" />
+				   	                        </mx:HBox> 
+				   	                </mx:VBox> 
+				                 </mx:Component> 
+			     			 </mx:itemRenderer>
+						</mx:TileList>
+						
+						<mx:VBox
+							width="100%" 
+							includeInLayout="{!isWorkingInOfflineMode &amp;&amp; slideshows.length == 0 ? true : false}"
+							visible="{!isWorkingInOfflineMode &amp;&amp; slideshows.length == 0 ? true : false}" 
+							height="120" 
+							horizontalAlign="center"
+							verticalAlign="middle">
+							<mx:Spacer height="40%" />
+							<mx:Text 
+								visible="{!isWorkingInOfflineMode &amp;&amp; slideshows.length == 0 ? true : false}" 
+								height="100%"  
+								textAlign="center" 
+								fontSize="16" 
+								text="Drag a file here or click 'Upload' to get started." />
+								
+						</mx:VBox>
+						
+						<mx:VBox 
+							width="100%" 
+							includeInLayout="{isWorkingInOfflineMode &amp;&amp; offlineSlideShows.length == 0 ? true : false}"
+							visible="{isWorkingInOfflineMode &amp;&amp; offlineSlideShows.length == 0 ? true : false}" 
+							height="120" 
+							horizontalAlign="center"
+							verticalAlign="middle">
+							<mx:Spacer height="40%" />
+							<mx:Text 
+								visible="{isWorkingInOfflineMode &amp;&amp; offlineSlideShows.length == 0 ? true : false}" 
+								height="100%" 
+								textAlign="center" 
+								fontSize="16" 
+								text="No offline presentations were found.  Please login and save a presentation offline." />
+								
+						</mx:VBox>
+						
+						<mx:VBox width="360" height="100%" backgroundColor="#111111" verticalAlign="middle" horizontalAlign="center" id="topBtnContainer" verticalGap="0">
+							<mx:VBox width="100%">
+								<mx:HBox width="100%" horizontalAlign="center" paddingTop="2" paddingBottom="0">
+									<mx:Text width="80" text="Presentation:" textAlign="left" />
+									<mx:Image source="{isWorkingInOfflineMode ? redBall : greenBall}" toolTip="{isWorkingInOfflineMode ? 'Offline' : 'Online'}" />
+									<mx:Text width="80" text="Network:" textAlign="left" />
+									<mx:Image source="{isOnline ? greenBall : redBall}" toolTip="{isOnline ? 'Available' : 'Unavailable'}" />
+									<mx:Text width="80" text="Twitter:" textAlign="left" />
+									<mx:Image source="{isListeningToTwitter ? greenBall : redBall}" toolTip="{isListeningToTwitter ? 'Monitoring' : 'Not Monitoring'}" />
+								</mx:HBox>
+								<mx:HBox width="100%" horizontalAlign="center" paddingTop="0" paddingBottom="0">
+									<mx:Text width="80" text="Broadcasting:" textAlign="left" />
+									<mx:Image source="{isBroadcasting ? greenBall : redBall}" toolTip="{isBroadcasting ? 'Broadcasting video' : 'Not Broadcasting'}" />
+									<mx:Text width="80" text="Chatting:" textAlign="left" />
+									<mx:Image source="{isChatting ? greenBall : redBall}" toolTip="{isChatting ? 'Logged into chat room' : 'Not logged into chat'}" />
+									<mx:Text width="80" text="Presenting:" textAlign="left" />
+									<mx:Image source="{isInPresenterMode ? greenBall : redBall}" toolTip="{isInPresenterMode ? 'Presenting' : 'Not Presenting'}" />
+								</mx:HBox>
+							</mx:VBox>
+							<mx:HBox width="100%" horizontalAlign="center" paddingBottom="2">
+								<mx:Button 
+									id="selectFileBtn" 
+									label="Upload" 
+									click="onBrowse(event)" 
+									width="100" 
+									enabled="{!isWorkingInOfflineMode}" 
+									toolTip="{selectFileBtn.enabled ? 'Choose a file to upload to SlideSix.  You can also drag a file into the presentation list.' : 'Upload unavailable in offline mode'}" />
+								<mx:Button id="toggleOnlineModeBtn" 
+									label="{isWorkingInOfflineMode ? 'Login' : 'Work Offline'}" 
+									click="isWorkingInOfflineMode ? views.selectedChild = loginView : workOffline();" 
+									toolTip="{isWorkingInOfflineMode ? 'Go back and login to your SlideSix account (currently working offline).' : 'Switch to offline mode'}" 
+									width="100"/>
+								<mx:Button 
+									id="openPrefWinBtn" 
+									label="Options" 
+									click="openPrefWindow(0)" 
+									toolTip="Change your preferences"  
+									width="100"/>
+							</mx:HBox>
+							<mx:HBox width="100%" horizontalAlign="center" paddingBottom="2">
+								<mx:Button id="exitAppBtn" 
+									label="Refresh" 
+									click="getSlideShows()" 
+									toolTip="Refresh your presentations" 
+									width="100"/>
+								<mx:Button id="makeOfflineBtn" 
+									label="Save Offline" 
+									click="confirmOffline()" 
+									enabled="{slideShowList.selectedIndex != -1 &amp;&amp; !isWorkingInOfflineMode ? true : false}" 
+									toolTip="{makeOfflineBtn.enabled ? 'Save this presentation to this computer so you can present it offline' : 'Select a presentation (unavailable in offline mode)'}" 
+									width="100"/>
+								<mx:Button 
+									id="openHelpWinBtn" 
+									label="Help" 
+									click="openHelpWindow('helpMenu')" 
+									toolTip="Get Help"  
+									width="100"/>
+							</mx:HBox>
+						</mx:VBox>
+					</mx:HBox>
+				</mx:Panel>
+				
+				<mx:HDividedBox id="middleContent" height="100%" width="100%" dividerAlpha="0" horizontalGap="0" enabled="{slides != null ? true : false}">
+					
+					<mx:VBox width="20" maxWidth="20" toolTip="{isOnline ? '' : 'Unavailable in offline mode'}" height="100%" backgroundColor="#111111" borderStyle="solid" borderColor="#1C1C1C" borderThickness="1" horizontalAlign="center" verticalAlign="middle" click="toggleSideBar('left')">
+						<mx:Image source="{leftSidebar.width &gt; 0 ? leftArrow : rightArrow}" />
+					</mx:VBox>
+					
+					<mx:VBox id="leftSidebar" width="0" maxWidth="300" minHeight="250" height="100%" resizeEffect="Resize" verticalGap="0">
+						
+						<arc:CollapsiblePanel id="vidPublishPanel" title="Live Broadcast" width="100%" height="285" status="{broadcastStatus}" verticalScrollPolicy="off">
+							<mx:Canvas id="broadcastCanvas" width="100%" height="100%" verticalScrollPolicy="off" horizontalScrollPolicy="off">
+								<mx:VBox id="broadcastContainer" width="100%" height="100%" verticalAlign="middle" horizontalAlign="center">
+									<mx:UIComponent id="vidContainer" width="250" height="188" />
+								</mx:VBox>
+								<mx:HBox width="100%" paddingLeft="8" paddingRight="8" id="toggleCamMicContainer" alpha="{isBroadcasting ? 0.3 : 1.0}" mouseOver="toggleCamMicContainer.alpha = 1.0;" mouseOut="toggleCamMicContainer.alpha = isBroadcasting ? 0.3 : 1.0;" verticalGap="0" horizontalGap="0" top="0" right="0" horizontalAlign="right">
+									<mx:CheckBox id="useMic" label="Use Mic?" selected="true" click="setUpCamMic()"  enabled="{hasMic ? true : false}" toolTip="{useMic.enabled ? 'Broadcast live audio from your microphone' : 'No microphones were detected'}" width="90" textAlign="left" labelPlacement="right"/>
+									<mx:Spacer width="100%" />
+									<mx:CheckBox id="useCam" label="Use Cam?" enabled="{hasCam ? true : false}" toolTip="{useCam.enabled ? 'Broadcast live video from your camera' : 'No cameras were detected'}" selected="true" click="setUpCamMic()"  width="90" textAlign="right" labelPlacement="left"/>
+								</mx:HBox>
+							</mx:Canvas>
+							
+							<mx:ControlBar id="vidControlBar" width="100%">
+								<mx:HBox width="100%">
+									<mx:Button id="startBroadcastBtn0" label="{isBroadcasting ? 'Stop' : 'Broadcast'}" click="isBroadcasting ? broadcast('stop') : broadcast('start')"  width="50%"/>
+									<!--<mx:Button id="screenShareBtn" label="Screen Share" click="goLink(screenShareURL)" width="50%"/>-->
+									<mx:Button id="broadcastHelpBtn" label="Help" click="openHelpWindow('broadcastHelp')" width="50%"/>
+								</mx:HBox>
+							</mx:ControlBar>
+						</arc:CollapsiblePanel>
+						
+						<mx:Panel id="chatPanel" title="Chat" width="100%" height="100%" minHeight="400" paddingLeft="0" paddingRight="0">
+							<mx:ViewStack id="chatStack" width="100%" height="100%">
+								<mx:VBox id="emptyChat">
+									
+								</mx:VBox>
+								<mx:VBox id="chatContainer" width="100%" height="100%">
+									<mx:HBox width="100%">
+										<mx:Button id="exitChatBtn" width="50%" label="{isChatting ? 'Exit' : 'Join'} Chat" click="isChatting ? exitChat() : joinChat();" />
+										<mx:Button id="chatHelpBtn" label="Help" click="openHelpWindow('chatHelp')" width="50%"/>
+										<!--<mx:Button id="copyChatURLBtn" width="50%" label="Chat Link" click="copyChatURL(event)" />-->
+									</mx:HBox>
+									<mx:List id="userList" width="100%" height="10%" dataProvider="{isChatting ? usersInThisRoom : null}">
+										<mx:itemRenderer> 
+							                <mx:Component> 
+						   	                	<mx:Text text="{data.username} {data.role == 'presenter' ? '(Presenter)' : ''}" fontSize="10"  />
+						                	</mx:Component> 
+						     			</mx:itemRenderer>
+									</mx:List>
+									
+									<mx:TextArea id="chatDisplay" width="100%" height="100%" editable="false" valueCommit="scrollChat()" />
+								</mx:VBox>
+							</mx:ViewStack>
+							<mx:ControlBar width="100%" enabled="{isChatting}" toolTip="{isChatting ? '' : 'Click join chat to get started'}">
+								<mx:HBox id="chatInputContainer" width="100%" styleName="pad10" verticalAlign="middle">
+									<mx:TextInput id="chatInput" width="75%"  enabled="{isChatting}" tabIndex="1" keyUp="checkEnter(event)" height="{sendChatBtn.height}" fontSize="12" paddingBottom="6" paddingTop="6" paddingLeft="10" paddingRight="10" /><!-- -->
+									<mx:Button id="sendChatBtn" width="25%" enabled="{isChatting}" label="Send" tabIndex="2" click="chatButtonClicked(event)" /><!--   -->		
+								</mx:HBox>
+							</mx:ControlBar>
+						</mx:Panel>
+							
+					</mx:VBox>
+					
+					<mx:Panel id="middleContainer" width="100%" height="100%" horizontalScrollPolicy="off" verticalScrollPolicy="auto" title="Slide">
+						<mx:Canvas width="100%" height="100%" id="slideCanvas" horizontalScrollPolicy="off" verticalScrollPolicy="auto">
+							<mx:HBox width="100%" height="100%" id="slideImgContainer" horizontalGap="0" verticalGap="0" horizontalScrollPolicy="off" verticalScrollPolicy="off">
+								<i:SmoothImage id="slideImage" updateComplete="fixImg(event)" height="{middleContainer.height - 100}" width="{middleContainer.width - 100}" scaleContent="true" maintainAspectRatio="true" />							
+							</mx:HBox>
+							<!--<mx:HBox bottom="5" right="0" verticalAlign="bottom">
+								<mx:HSlider id="slideScale" minimum="1" maximum="100" value="100" dataTipPlacement="left" tickColor="black" snapInterval="1" tickInterval="10" labels="" allowTrackClick="true" liveDragging="true" enabled="{slideList.selectedIndex != -1}" width="100" change="slideImage.width = initialSlideWidth * (slideScale.value / 100)" toolTip="Resize Slide" />
+							</mx:HBox>-->
+						</mx:Canvas>
+						<mx:ControlBar id="slideControlBar" horizontalAlign="center" verticalAlign="middle">
+							<mx:HBox width="100%">
+								<!--<mx:Button id="monitorPrefBtn" click="openPrefWindow(3)" label="" width="33" height="{goToPresentationsBtn.height}" icon="{gearImg}"/>-->
+								<!--<mx:Button id="goToPresentationsBtn" width="150" click="goToPresentationView()" label="Exit Presentation" />-->
+								<!-- <mx:Button id="viewPresoBtn" click="openPresentation()" label="View Presentation" /> -->
+								<mx:Button id="openPresenterViewBtn" width="180" click="openPresenterView()" label="{!isInPresenterMode ? 'Enter Presenter Mode' : 'Exit Presenter Mode'}" />
+								<mx:Button id="showPresoURLBtn" width="135" click="togglePresoURL()" label="{isShowingPresoURL ? 'Hide Link' : 'Show Link'}" enabled="{isInPresenterMode}" toolTip="{showPresoURLBtn.enabled ? 'Show your audience a link where this presentation can be viewed online' : 'Only available in presenter mode'}" />
+								<mx:Spacer width="100%" />
+								<mx:Button id="prevSlideBtn" width="135" click="navigate('prev')" enabled="{slideList.selectedIndex &gt; 0 &amp;&amp; slideList.dataProvider.length &gt; 1}" label="Previous Slide" />
+								<mx:Button id="nextSlideBtn" width="135" click="navigate('next')" enabled="{slideList.selectedIndex != slideList.dataProvider.length - 1}" label="Next Slide" />
+							</mx:HBox>
+						</mx:ControlBar>
+					</mx:Panel>
+					
+					<mx:VBox id="rightSidebar" height="100%" width="0" maxWidth="300" minHeight="250" resizeEffect="Resize" verticalGap="0" verticalScrollPolicy="auto">
+						<mx:Panel title="Notes" width="100%" id="notesPanel" height="100%" minHeight="200" paddingLeft="0" paddingRight="0">
+							<mx:Canvas id="notesCanvas" width="100%" height="100%">
+								<mx:TextArea id="slideNotes" editable="false" text="{slideList.selectedItem.NOTES != null ? slideList.selectedItem.NOTES : 'No notes exist'}" width="100%" height="100%" fontSize="{notesTextSize}" />
+							</mx:Canvas>
+						</mx:Panel>
+						
+						<arc:CollapsiblePanel id="twitterPanel" width="100%" minHeight="300" height="100%" headerHeight="{isOnline ? 32 : 0}" title="Twitter Monitor" collapsed="{!isOnline}" visible="{isOnline}" status="{twitterServiceStatus}" paddingLeft="0" paddingRight="0">
+							<mx:TextInput id="twitterSearchString" text="" width="100%" height="5%" />
+							<mx:VBox id="twitterContainer" width="100%" height="95%" borderStyle="none">
+								<mx:List id="tweetList" width="100%" height="100%" dataProvider="{tweets}" borderStyle="solid" borderThickness="1" dragEnabled="true">
+									<mx:itemRenderer> 
+						                <mx:Component> 
+						   	                <mx:HBox verticalAlign="middle">
+						   	                	<i:SmoothImage width="50" height="50" source="{data.profile_image_url}" toolTip="{data.from_user}" />
+						   	                	<mx:Text text="{data.from_user}: {data.text}" width="195" height="70" fontSize="10"  />
+						   	                </mx:HBox> 
+						                 </mx:Component> 
+					     			 </mx:itemRenderer>
+								</mx:List>
+							</mx:VBox>
+							<mx:ControlBar id="twitterControlBar">
+								<mx:Button id="startTwitterMonitor" width="95" label="{isListeningToTwitter ? 'Mute' : 'Listen'}" click="toggleTwitter(!isListeningToTwitter);" />
+								<mx:Button id="refreshTwitterBtn" label="Refresh" width="95" click="searchTwitter(new TimerEvent('timer'))" />
+								<mx:Button id="showTweetBtn" label="{isShowingTweet ? 'Hide' : 'Show'}" width="95" enabled="{isInPresenterMode &amp;&amp; tweetList.selectedIndex != -1}" click="{isShowingTweet ? hideTweet() : showTweet(tweets[tweetList.selectedIndex])}" toolTip="{showTweetBtn.enabled ? 'Show/Hide this Tweet to your live audience' : 'Must be in presenter mode'}" /> 
+							</mx:ControlBar>
+						</arc:CollapsiblePanel>
+						
+					</mx:VBox>
+					
+					<mx:VBox width="20" maxWidth="20" height="100%" backgroundColor="#111111" borderStyle="solid" borderColor="#1C1C1C" borderThickness="1" horizontalAlign="center" verticalAlign="middle" click="toggleSideBar('right')">
+						<mx:Image source="{rightSidebar.width &gt; 0 ? rightArrow : leftArrow}" />
+					</mx:VBox>
+					
+				</mx:HDividedBox>
+				
+				<mx:Panel title="Slides" id="bottom" width="100%" height="0" resizeEffect="Resize" enabled="{slides != null ? true : false}" backgroundDisabledColor="#191919" disabledOverlayAlpha=".7">
+					<mx:HBox id="slideListContainer" width="100%">
+						<mx:TileList id="slideList" dataProvider="{slides}" rowCount="1" width="100%" height="120" direction="vertical" change="setPresentationSlide()">
+							<mx:itemRenderer> 
+				                <mx:Component> 
+				   	                 <mx:VBox horizontalAlign="center" width="140" height="100" verticalAlign="middle" toolTip="{data.TITLE}"> 
+				   	                        <mx:HBox width="100%" height="100%" horizontalAlign="center" verticalAlign="middle">
+				   	                        	<i:SmoothImage 
+													source="{data.PATHTOSLIDETHUMB != null ? (parentApplication.isWorkingInOfflineMode ? data.PATHTOSLIDETHUMB : parentApplication.baseURL + data.PATHTOSLIDETHUMB) : parentApplication.noSlide}" height="90" width="120" styleName="slideImage" />
+				   	                        </mx:HBox> 
+				   	                </mx:VBox> 
+				                 </mx:Component> 
+			     			 </mx:itemRenderer>
+						</mx:TileList>
+					</mx:HBox>
+				</mx:Panel>
+				<mx:VBox height="20" maxHeight="20" width="100%" backgroundColor="#111111" borderStyle="solid" borderColor="#1C1C1C" borderThickness="1" horizontalAlign="center" verticalAlign="middle" click="toggleTopBottomBar('bottom')">
+					<mx:Image source="{bottom.height &gt; 0 ? rightArrow : leftArrow}" rotation="90" />
+				</mx:VBox>
+			</mx:VBox>
+		</mx:ViewStack>
+	<!--</mx:TitleWindow>-->
+</mx:WindowedApplication>

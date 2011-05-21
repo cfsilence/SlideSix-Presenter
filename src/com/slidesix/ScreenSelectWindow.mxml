@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init();" width="400" height="200" 
+	title="Choose Monitor" verticalAlign="middle" showCloseButton="false" xmlns:igor="br.igorcosta.controls.*">
+	<mx:Script>
+		<![CDATA[
+		import mx.events.DynamicEvent;
+		import mx.utils.ObjectUtil;
+		import mx.controls.Alert;
+		import mx.events.CloseEvent;
+		import mx.managers.PopUpManager;
+		
+		public var screenSelectedEvent:DynamicEvent;
+				
+		[Bindable] public var availableScreens:Array = Screen.screens;
+		
+		public function init():void {
+			this.addEventListener(CloseEvent.CLOSE, closeHandler);
+			screenSelectedEvent = new DynamicEvent("screenSelectedEvent");
+ 			screenSelectedEvent.name = name;
+			if(availableScreens.length == 1){
+				selectScreen(0);
+			}	
+		}
+		
+		public function selectScreen(f:Number):void{
+			screenSelectedEvent.screen = f;
+ 			dispatchEvent(screenSelectedEvent);
+ 			closeHandler(new Event(Event.CLOSE));
+		}
+		
+		public function closeHandler(e:Event):void {
+			PopUpManager.removePopUp(this);
+		}
+		
+		]]>
+	</mx:Script>
+	<mx:HBox width="100%" height="100%">
+		<mx:Repeater dataProvider="{availableScreens}" id="screenRepeater">
+			<igor:ICButton width="177" height="135" click="selectScreen(event.target.instanceIndices)" label="{'Screen #' + (screenRepeater.currentIndex + 1) + '\n(' + screenRepeater.currentItem.bounds.width + ' x ' + screenRepeater.currentItem.bounds.height + ')'}" fontSize="12" />
+		</mx:Repeater>
+		
+	</mx:HBox>
+		
+</mx:TitleWindow>

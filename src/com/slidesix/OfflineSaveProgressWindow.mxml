@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init();" width="600" height="350" 
+	showCloseButton="false" title="Offline Save Progress (Window Will Automatically Close When Finished)" verticalAlign="middle">
+	<mx:Style>
+	    .centerAligned {
+	        textAlign: center;
+	    }
+	</mx:Style>
+	<mx:Script>
+		<![CDATA[
+		import mx.events.CollectionEvent;
+		import mx.collections.ArrayCollection;
+		import mx.events.CloseEvent;
+		import mx.managers.PopUpManager;
+		import mx.controls.Alert;
+		
+		[Bindable] public var offlineFileQueue:ArrayCollection;
+		[Bindable] public var isSaveComplete:Boolean = false;
+		
+		public function init():void {
+			offlineFileQueue.addEventListener(CollectionEvent.COLLECTION_CHANGE, function(){
+				var isComplete:Boolean = true;
+				
+				for (var i:Number = 0; i < offlineFileQueue.length; i++) {
+					var thisItem:Object = offlineFileQueue.getItemAt(i);
+					if(thisItem.eBytesLoaded < thisItem.eBytesTotal || thisItem.eBytesTotal == 0){
+						isComplete = false;
+					}
+				}
+				
+				isSaveComplete = isComplete;
+				
+				if(isSaveComplete){
+					closeWin();
+				}
+			}); 
+		}
+		
+		public function closeWin():void{
+			dispatchEvent(new CloseEvent(CloseEvent.CLOSE));
+			PopUpManager.removePopUp(this);
+		}
+		
+		]]>
+	</mx:Script>
+	
+	<mx:HBox width="100%" height="100%">
+		<mx:DataGrid id="saveProgressGrid" dataProvider="{offlineFileQueue}" height="100%" width="100%" editable="true" rowHeight="25">
+			<mx:columns>
+				<mx:DataGridColumn headerText="Slide" dataField="file" sortable="true" headerWordWrap="true" editable="false" textAlign="center" headerStyleName="centerAligned" />
+				<mx:DataGridColumn headerText="Download Progress" editable="false" headerStyleName="centerAligned">
+					<mx:itemRenderer> 
+		                <mx:Component> 
+		   	                 <mx:VBox horizontalAlign="center" verticalAlign="middle" dataChange="updateDownloadProgress(event)"> 
+		   	                 	
+			   	                 <mx:Script>
+									<![CDATA[
+									public function updateDownloadProgress(e:Event):void {
+										if (data.dBytesLoaded == undefined) {
+											dProgress.setProgress(0, 0);
+										}
+										else {
+											dProgress.setProgress(data.dBytesLoaded, data.dBytesTotal);
+											dProgress.label = 'Downloading ' + Math.ceil(dProgress.percentComplete).toString() + '%';
+										}
+									}
+									
+									]]>
+								</mx:Script>
+								
+	   	                        <mx:HBox width="100%" height="100%" horizontalAlign="center" verticalAlign="middle">
+	   	                        	<mx:ProgressBar 
+	   	                        		mode="manual" 
+	   	                        		id="dProgress" 
+	   	                        		height="20" 
+	   	                        		label="Downloading" 
+	   	                        		labelPlacement="center" 
+	   	                        		color="#000000" 
+	   	                        		barSkin="mx.skins.halo.ProgressBarSkin" 
+	   	                        		trackSkin="mx.skins.halo.ProgressTrackSkin" 
+	   	                        		trackHeight="20" 
+	   	                        		width="95%" trackColors="#888888" />
+	   	                        </mx:HBox> 
+		   	                </mx:VBox> 
+		                 </mx:Component> 
+	     			 </mx:itemRenderer>
+				</mx:DataGridColumn>
+				<mx:DataGridColumn headerText="Save Progress" editable="false" headerStyleName="centerAligned">
+					<mx:itemRenderer> 
+		                <mx:Component> 
+		   	                 <mx:VBox horizontalAlign="center" verticalAlign="middle" dataChange="updateEncodeProgress(event)"> 
+			   	                 <mx:Script>
+									<![CDATA[
+									public function updateEncodeProgress(e:Event):void {
+										if (data.eBytesLoaded == undefined) {
+											eProgress.setProgress(0, 0);
+										}
+										else {
+											eProgress.setProgress(data.eBytesLoaded, data.eBytesTotal);
+											eProgress.label = 'Saving ' + Math.ceil(eProgress.percentComplete).toString() + '%';
+										}
+									}
+									
+									]]>
+								</mx:Script>
+	   	                        <mx:HBox width="100%" height="100%" horizontalAlign="center" verticalAlign="middle">
+	   	                        	<mx:ProgressBar 
+	   	                        		mode="manual" 
+	   	                        		id="eProgress" 
+	   	                        		height="20" 
+	   	                        		label="Saving" 
+	   	                        		labelPlacement="center"
+	   	                        		color="#000000" 
+	   	                        		barSkin="mx.skins.halo.ProgressBarSkin" 
+	   	                        		trackSkin="mx.skins.halo.ProgressTrackSkin" 
+	   	                        		trackHeight="20" 
+	   	                        		width="95%" 
+	   	                        		trackColors="#888888" />
+	   	                        </mx:HBox> 
+		   	                </mx:VBox> 
+		                 </mx:Component> 
+	     			 </mx:itemRenderer>
+				</mx:DataGridColumn>
+			</mx:columns>
+		</mx:DataGrid>
+	</mx:HBox>
+	<!--
+	<mx:ControlBar width="100%">
+		<mx:Spacer width="100%" />
+		<mx:Button id="closeBtn" label="Done {isSaveComplete}" enabled="{isSaveComplete}" click="closeHandler(event)" />
+	</mx:ControlBar>
+	-->
+</mx:TitleWindow>

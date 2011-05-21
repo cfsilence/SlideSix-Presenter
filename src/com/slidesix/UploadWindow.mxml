@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init();" width="400" height="380" 
+				showCloseButton="true" title="Upload" verticalAlign="middle">
+	<mx:Script>
+		<![CDATA[
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.DynamicEvent;
+			import mx.managers.PopUpManager;
+			import mx.messaging.Channel;
+			import mx.messaging.ChannelSet;
+			import mx.messaging.channels.AMFChannel;
+			import mx.rpc.events.ResultEvent;
+			import mx.utils.ObjectUtil;
+			
+			public var isPendingUpload:Boolean = true;
+			public var fileToUpload:File;
+			public var uploadURL:String;
+			[Bindable] public var eURL:String;
+			[Bindable] public var rChannelSet:ChannelSet;
+			public var sessionToken:String;
+			public var uploadCompleteEvent:DynamicEvent;
+			public var userID:int;
+			
+			[Bindable]
+			public var isUploading:Boolean;
+			
+			public function init():void {
+				this.addEventListener(CloseEvent.CLOSE, closeHandler);
+				uploadCompleteEvent = new DynamicEvent("uploadCompleteEvent");
+				uploadCompleteEvent.name = name;
+				setForm();
+				uploadProgressBar.indeterminate = false;
+			}
+			
+			public function closeHandler(e:Event):void {
+				if(!isUploading){
+					if(isPendingUpload){
+						Alert.show('Are you sure?  You haven\'t uploaded this presentation yet.', 'Hold up...', 3, this, confirmClose);
+					}
+					else{
+						dispatchEvent(uploadCompleteEvent);
+						PopUpManager.removePopUp(this);	
+					}
+				}
+				else{
+					Alert.show('Please wait until upload is complete.');
+				}
+			}
+			
+			public function setForm():void{
+				var nArr:Array = fileToUpload.name.split('.');
+				var n:String = nArr[0];
+				slideShowTitle.text = n;
+				slideShowDescription.text = 'This is my presentation about '+ n;
+				tags.text = '';
+				notifyComments.selected = true;
+				showNotes.selected = true;
+			}
+			
+			public function confirmClose(e:CloseEvent):void{
+				if (e.detail == Alert.YES) {
+					PopUpManager.removePopUp(this);
+				}
+			}
+			
+			public function uploadBtnClicked(e:Event):void{
+				var err:Object = validateUpload();
+				
+				if(err.hasErrors){
+					Alert.show(err.msg);
+				}
+				else{
+					uploadPresentation();
+				}
+			}
+			
+			public function validateUpload():Object{
+				var rObj:Object = { msg:'Please address the following errors before uploading:\n', hasErrors:false };
+				
+				if(slideShowTitle.text.length > 255){
+					rObj.msg += 'Title must be less then 255 characters.\n';
+					rObj.hasErrors = true;
+				}
+				if(!slideShowTitle.text.length){
+					rObj.msg += 'Title is required.\n';
+					rObj.hasErrors = true;
+				}
+				if(!slideShowDescription.text.length){
+					rObj.msg += 'Description is required.\n';
+					rObj.hasErrors = true;
+				}
+				if(slideShowDescription.text.length > 3000){
+					rObj.msg += 'Description must be less then 3000 characters.\n';
+					rObj.hasErrors = true;
+				}
+				return rObj;
+			}
+			
+			public function uploadPresentation():void{
+				isUploading = true;
+				var request:URLRequest = new URLRequest(uploadURL);
+				var params:URLVariables = new URLVariables();  
+				params.fileField = 'slideshowImportFile';
+				params.returnFormat = 'plain';
+				request.method = URLRequestMethod.POST;
+				
+				this.status = 'Uploading';
+				
+				request.data = params;
+				
+				fileToUpload.addEventListener(Event.COMPLETE , uploadCompleteHandler);
+				fileToUpload.addEventListener(DataEvent.UPLOAD_COMPLETE_DATA , uploadCompleteData);
+				fileToUpload.addEventListener(ProgressEvent.PROGRESS,monitorUploadProgress);
+				fileToUpload.addEventListener(IOErrorEvent.IO_ERROR,uploadFaultHandler);
+				fileToUpload.upload(request, 'slideshowImportFile', false);
+			}
+			
+			public function uploadCompleteHandler(e:Event):void{
+				
+			}
+			
+			public function saveSlideshowInfoAndConvertHandler(e:ResultEvent):void{
+				isUploading = false;
+				isPendingUpload = false;
+				this.status = 'Saved.';
+				closeHandler(new Event(Event.CLOSE));
+			}
+			
+			public function uploadCompleteData(e:DataEvent):void{
+				var params:Object = new Object();
+				params.title = slideShowTitle.text;
+				params.abstract = slideShowDescription.text;
+				params.notifyComments = notifyComments.selected;
+				params.showNotes = showNotes.selected; 
+				params.lastBuildDate = new Date();
+				if(tags.text.length){
+					params.tags = tags.text;
+				}
+				
+				var tempFileName:String = e.data.toString();
+				slideShowRemoteService.saveSlideshowInfoAndConvert(tempFileName,0,params,userID);
+				this.status = 'Upload Complete.  Saving...';
+				
+				
+			}
+			
+			public function monitorUploadProgress(e:ProgressEvent):void{
+				if (e.bytesLoaded == undefined) {
+					uploadProgressBar.setProgress(0, 0);
+				}
+				else {
+					uploadProgressBar.setProgress(e.bytesLoaded, e.bytesTotal);
+					uploadProgressBar.label = 'Uploading ' + Math.ceil(uploadProgressBar.percentComplete).toString() + '%';
+				}
+				if (e.bytesLoaded == e.bytesTotal){
+					this.status = 'Converting';
+					uploadProgressBar.label = 'Converting';
+					uploadProgressBar.indeterminate = true;
+				}
+			}
+			
+			public function uploadFaultHandler(e:IOErrorEvent):void{
+				isUploading = false;
+				Alert.show('An error has occurred.', 'Error...');
+				this.status = 'Error';
+				trace(ObjectUtil.toString(e.text));
+			}
+			
+		]]>
+	</mx:Script>
+	<mx:Style>
+		.tab{
+			paddingBottom: 10;
+			paddingTop: 10;
+			paddingLeft: 10;
+			paddingRight: 10;
+		}
+	</mx:Style>
+	
+	<mx:RemoteObject channelSet="{rChannelSet}" id="slideShowRemoteService" endpoint="{eURL}" destination="ColdFusion" source="services.slideshows.RemoteSlideShowService" showBusyCursor="true">
+		<mx:method name="saveSlideshowInfoAndConvert" result="saveSlideshowInfoAndConvertHandler(event)" fault="parentApplication.faultHandler(event)" />
+	</mx:RemoteObject>
+	
+	<mx:VBox width="100%" height="100%">
+		<mx:HBox width="100%">
+			<mx:Text text="Title*" width="70" textAlign="right" />
+			<mx:TextInput id="slideShowTitle"  width="100%" /> 
+		</mx:HBox>
+		<mx:HBox width="100%">
+			<mx:Text text="Description*" width="70" textAlign="right" />
+			<mx:TextArea id="slideShowDescription" height="105" width="100%" /> 
+		</mx:HBox>
+		<mx:HBox width="100%">
+			<mx:Text text="Tags" width="70" textAlign="right" />
+			<mx:TextInput id="tags"  width="100%" /> 
+		</mx:HBox>
+		<!--<mx:HBox width="100%">
+		<mx:Text text="Recorded URL" width="70" textAlign="right" />
+		<mx:TextInput id="recordedURL"  width="100%" /> 
+		</mx:HBox>
+		<mx:HBox width="100%">
+		<mx:Spacer width="70" />
+		<mx:Text text="Optional.  URL to a pre-recorded version of this presentation." width="70" textAlign="right" />
+		</mx:HBox>-->
+		<mx:HBox width="100%">
+			<mx:Text text="" width="70" textAlign="right" />
+			<mx:Text text="Please separate each tag with a comma" width="100%" /> 
+		</mx:HBox>
+		<mx:HBox width="100%">
+			<mx:Spacer width="70" />
+			<mx:CheckBox id="notifyComments" width="100%" label="Notify Me When Comments Posted" /> 
+		</mx:HBox>
+		<mx:HBox width="100%">
+			<mx:Spacer width="70" />
+			<mx:CheckBox id="showNotes" width="100%" label="Show Notes To Public" /> 
+		</mx:HBox>
+	</mx:VBox>
+	<mx:ControlBar id="uploadControlBar">
+		<mx:ProgressBar 
+			visible="{isUploading}"
+			mode="manual" 
+			id="uploadProgressBar" 
+			height="{uploadBtn.height}" 
+			label="Uploading" 
+			labelPlacement="center" 
+			color="#000000" 
+			barSkin="mx.skins.halo.ProgressBarSkin" 
+			trackSkin="mx.skins.halo.ProgressTrackSkin" 
+			indeterminateSkin="mx.skins.halo.ProgressIndeterminateSkin"
+			trackHeight="20" 
+			width="200" trackColors="#888888" />
+		<mx:Spacer width="100%" />
+		<mx:Button id="uploadBtn" label="Upload Now" click="uploadBtnClicked(event)" enabled="{!isUploading}" /> 
+		<mx:Button id="cancelUploadBtn" label="Cancel" click="closeHandler(event)" enabled="{!isUploading}" />
+	</mx:ControlBar>
+</mx:TitleWindow>

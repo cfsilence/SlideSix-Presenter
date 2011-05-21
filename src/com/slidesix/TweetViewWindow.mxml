@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init()" showCloseButton="true">
+	<mx:Script>
+		<![CDATA[
+			import mx.controls.Text;
+			import com.aaronhardy.callout.Callout;
+			import com.slidesix.SmoothImage;
+			import mx.utils.ObjectUtil;
+			import mx.managers.PopUpManager;
+			import mx.events.ResizeEvent;
+			import mx.events.CloseEvent;
+			
+     		[Bindable] public var tweet:Object;
+     		
+			public function init():void{
+				this.addEventListener(Event.CLOSE, handleClose);
+				var i:SmoothImage = new SmoothImage();
+				i.source = tweet.profile_image_url;
+				i.width = 125;
+				i.height = 125;
+				tweetContainer.addChild(i);
+				
+                var tweetText:Text = new Text();
+                tweetText.text = tweet.text;
+                tweetText.setStyle('fontSize', 48);
+                tweetText.width = tweetContainer.width - i.width - tweetContainer.getStyle('horizontalGap'); 
+                tweetContainer.addChild(tweetText);
+			}
+			public function handleClose(e:Event):void{
+				PopUpManager.removePopUp(this);
+			}
+			
+        
+		]]>
+	</mx:Script>
+	<mx:HBox id="tweetContainer" width="100%" height="100%" horizontalAlign="center" verticalAlign="middle" />
+</mx:TitleWindow>

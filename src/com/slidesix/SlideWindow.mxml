@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Window xmlns:mx="http://www.adobe.com/2006/mxml" xmlns:i="com.slidesix.*" transparent="false" showFlexChrome="false" creationComplete="init()" backgroundColor="#000000" borderColor="#000000">
+	<mx:Script>
+		<![CDATA[
+			import mx.controls.Text;
+			import mx.controls.HTML;
+			import mx.managers.PopUpManager;
+			import mx.events.CloseEvent;
+			import mx.containers.VBox;
+			import mx.containers.TitleWindow;
+			import mx.events.ResizeEvent;
+			import mx.core.WindowedApplication;
+			import mx.utils.ObjectUtil;
+			import mx.controls.Alert;
+			import mx.core.Application;
+			import com.slidesix.SmoothImage;
+			
+     		[Bindable] public var maintainRatio:Boolean = true;
+     		[Bindable] public var imgSrc:String;
+     		[Bindable] public var presoURL:String;
+     		[Bindable] public var showPresoURL:Boolean = false;
+     		[Bindable] public var showTweet:Boolean = false;
+     		[Bindable] public var tweet:String;
+     		[Bindable] public var tweetImg:String;
+     		
+     		public var fW:Number = 0;
+     		public var fH:Number = 0;
+     		public var rW:Number = 0;
+     		public var rH:Number = 0;
+     		
+			public function init():void{
+				//dispatchEvent(new SlideNavigateEvent('slideNavigate','next'));
+				var cMenu:NativeMenu = new NativeMenu();
+				var item1:NativeMenuItem = new NativeMenuItem("Toggle Aspect Ratio (Stretch)");
+				var item2:NativeMenuItem = new NativeMenuItem("", true);
+				var item3:NativeMenuItem = new NativeMenuItem("Next Slide");
+				var item4:NativeMenuItem = new NativeMenuItem("Previous Slide");
+				var item5:NativeMenuItem = new NativeMenuItem("", true);
+				var item6:NativeMenuItem = new NativeMenuItem("First Slide");
+				var item7:NativeMenuItem = new NativeMenuItem("Last Slide");
+				var item8:NativeMenuItem = new NativeMenuItem("", true);
+				var item9:NativeMenuItem = new NativeMenuItem("Help");
+				var item10:NativeMenuItem = new NativeMenuItem("", true);
+				var item11:NativeMenuItem = new NativeMenuItem("End Show");
+				item1.addEventListener(Event.SELECT, changeSlideRatio);
+				item3.addEventListener(Event.SELECT, navigateSelected);
+				item4.addEventListener(Event.SELECT, navigateSelected);
+				item6.addEventListener(Event.SELECT, navigateSelected);
+				item7.addEventListener(Event.SELECT, navigateSelected);
+				item9.addEventListener(Event.SELECT, helpSelected);
+				item11.addEventListener(Event.SELECT, endSelected);
+				cMenu.addItem(item1);
+				cMenu.addItem(item2);
+				cMenu.addItem(item3);
+				cMenu.addItem(item4);
+				cMenu.addItem(item5);
+				cMenu.addItem(item6);
+				cMenu.addItem(item7);
+				cMenu.addItem(item8);
+				cMenu.addItem(item9);
+				cMenu.addItem(item10);
+				cMenu.addItem(item11);
+				this.contextMenu = cMenu;
+				fW = slideWinSlideContainer.width;
+				fH = slideWinSlideContainer.height;
+				this.addEventListener(Event.CLOSE, function():void{Application.application.isInPresenterMode = false; Application.application.isShowingTweet = false;});
+				stage.addEventListener(KeyboardEvent.KEY_DOWN, keyHandler);
+				stage.addEventListener(FullScreenEvent.FULL_SCREEN, fullScreenHandler);
+			}
+			
+			public function fullScreenHandler(e:FullScreenEvent):void{
+				if(!e.fullScreen){
+					stage.nativeWindow.close();
+				}
+			}
+			
+			public function keyHandler(event:KeyboardEvent):void{
+				switch (event.keyCode) {
+					
+					case Keyboard.P:
+					case Keyboard.BACKSPACE:
+					case Keyboard.DELETE:
+					case Keyboard.UP:
+					case Keyboard.PAGE_UP:
+					case Keyboard.LEFT:
+						proxyNavigate('prev');
+						event.stopPropagation();
+						break;
+						
+					case Keyboard.SPACE:
+					case Keyboard.ENTER:
+					case Keyboard.DOWN:
+					case Keyboard.RIGHT:
+					case Keyboard.N:
+					case Keyboard.PAGE_DOWN:	
+						proxyNavigate('next');
+						event.stopPropagation();
+						break;
+						
+					case Keyboard.ESCAPE:
+						this.close();
+					break;
+				}
+			}
+			
+			public function navigateSelected(e:Event):void{
+				var menuItem:NativeMenuItem = e.target as NativeMenuItem;
+				if(menuItem.label.toLowerCase() == 'next slide'){
+					//real fucking shitty hack here - flex apparently has a problem with dispatching a custom event at this point, so fuck it...
+					proxyNavigate('next');
+				}
+				else if(menuItem.label.toLowerCase() == 'previous slide'){
+					proxyNavigate('prev');
+				}
+				else if(menuItem.label.toLowerCase() == 'first slide'){
+					proxyNavigate('first');
+				}
+				else if(menuItem.label.toLowerCase() == 'last slide'){
+					proxyNavigate('last');
+				}
+			}
+			
+			public function proxyNavigate(dir:String):void{
+				Application.application.navigate(dir);
+			}
+			
+			public function endSelected(e:Event):void{
+				this.close();
+			}
+			
+			public var helpWin:TitleWindow;
+			
+			public function helpSelected(e:Event):void{
+				helpWin = new TitleWindow();
+				
+				var helpTxt:String = "<p>Advance To Next Slide:</p><ul><li>Left mouse click</li><li>Space Bar</li><li>Enter</li><li>Right Arrow</li><li>Down Arrow</li><li>'N'</li><li>Page Down</li></ul><p>Advance To Previous Slide:</p><ul><li>Left Arrow</li><li>Up Arrow</li><li>Backspace</li><li>Delete</li><li>'P'</li><li>Page Up</li></ul><p>End Presentation:</p><ul><li>Esc</li></ul>";
+				helpWin.width = 325;
+				helpWin.height = 480;
+				helpWin.showCloseButton = true;
+				helpWin.title = 'Presenter Mode Shortcuts';
+				
+				var t:Text = new Text();
+				t.setStyle('fontSize', '18');
+				t.percentHeight = 100;
+				t.percentWidth = 100;
+				t.htmlText = helpTxt;
+								
+				var vbox:VBox = new VBox();
+				vbox.percentHeight = 100;
+				vbox.percentWidth = 100;
+				vbox.addChild(t);
+				helpWin.addChild(vbox);
+				
+				helpWin.addEventListener(CloseEvent.CLOSE, closeHelpWinHandler);
+				
+				PopUpManager.addPopUp(helpWin, this, true);
+				PopUpManager.centerPopUp(helpWin);
+			}
+			
+			public function closeHelpWinHandler(e:CloseEvent):void{
+				PopUpManager.removePopUp(helpWin)
+			}
+			
+			public function changeSlideRatio(e:Event):void{
+				if(maintainRatio){
+					slideImg.width = fW;
+					slideImg.height = fH;
+				}
+				else{
+					slideImg.width = rW;
+					slideImg.height = rH;
+				}
+				slideImg.maintainAspectRatio = !maintainRatio;
+				maintainRatio = !maintainRatio;
+			}
+			
+			public function fixImg(e:Event):void{
+				if((rW == 0 && rH == 0) && slideImg.contentWidth != 0){
+					rW = slideImg.contentWidth;
+					rH = slideImg.contentHeight;
+					slideImg.width = rW;
+					slideImg.height = rH;
+				}
+			}
+        
+		]]>
+	</mx:Script>
+	<mx:Canvas width="100%" height="100%" id="slideWinCanvas" backgroundColor="#000000">
+		<mx:HBox width="100%" height="100%" id="slideWinSlideContainer" horizontalAlign="center" verticalAlign="middle">
+			<i:SmoothImage id="slideImg" updateComplete="fixImg(event)" click="Application.application.navigate('next');" width="100%" height="100%" source="{imgSrc}"  maintainAspectRatio="{maintainRatio}" />
+		</mx:HBox>
+		<mx:HBox width="100%" height="300" bottom="0" backgroundAlpha=".7" backgroundColor="#000000" horizontalAlign="center" verticalAlign="middle" visible="{showPresoURL}">
+			<mx:Text fontSize="36" text="{presoURL}" color="#ffffff" />
+		</mx:HBox>
+		<mx:HBox width="100%" height="550" bottom="0" backgroundAlpha=".7" backgroundColor="#000000" horizontalAlign="left" verticalAlign="middle" visible="{showTweet}">
+			<mx:Spacer width="30" />
+			<i:SmoothImage source="{tweetImg}" width="125" height="125" />
+			<mx:Spacer width="30" />
+			<mx:Text fontSize="48" text="{tweet}" color="#ffffff" width="{this.width - 225}" />
+		</mx:HBox>
+	</mx:Canvas>
+</mx:Window>

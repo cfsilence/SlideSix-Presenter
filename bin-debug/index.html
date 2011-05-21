@@ -1,0 +1,69 @@
+<HTML>
+<BODY>
+
+<SCRIPT language="JavaScript">
+//if (self != top) top.location = document.location;
+</SCRIPT>
+
+<APPLET CODE="CScreenShareStarter.class" archive="VHScreenShare.jar" name="VHScreenShare" WIDTH="10" HEIGHT="10">
+</APPLET>
+
+<SCRIPT language="JavaScript">
+function doAlert(s) {
+   alert(s);
+}
+
+function startJScrCap() {
+	var arg = document.Form1.url.value + "," +
+		document.Form1.frametime.value + "," +
+		document.Form1.keyframetime.value + "," + 
+		document.Form1.bitrate.value + "," + 
+		document.Form1.maxdelay.value + "," + 
+		document.Form1.codec.value;
+        document.VHScreenShare.start_streaming(arg, document.Form1.desktop_rect.value);
+}
+
+function stopJScrCap() {
+        document.VHScreenShare.stop_streaming();
+}
+
+function moveJScrCap() {
+        document.VHScreenShare.move_area(document.Form1.desktop_rect.value);
+}
+
+function mouseJScrCap() {
+	alert(document.VHScreenShare.get_mousepointer());
+}
+</SCRIPT>
+
+<FORM name="Form1">
+URL: <INPUT TYPE="text" NAME="url" value="rtmp://hmelyoff.dyndns.org/live+livestream" SIZE="50" /><br />
+frame time (ms): <INPUT TYPE="text" NAME="frametime" value="100" SIZE="6" /><br />
+keyframe time (ms): <INPUT TYPE="text" NAME="keyframetime" value="3000" SIZE="6" /><br />
+bitrate (bit/sec): <INPUT TYPE="text" NAME="bitrate" value="1000000" SIZE="10" /><br />
+max delay (ms): <INPUT TYPE="text" NAME="maxdelay" value="1000" SIZE="6" /><br />
+codec name and settings: <INPUT TYPE="text" NAME="codec" value="svc1,3,3,9,1000,4" SIZE="30" /> (svc1,blockX,blocky,z_rate,bitrate_duration,enc.bits) or (h264,level,profile)<br />
+rect: <INPUT TYPE="text" NAME="desktop_rect" value="0,0,800,600" SIZE="15" /><br />
+last event: <INPUT TYPE="text" NAME="events" value="last event" SIZE="100" /><br />
+<INPUT TYPE="button" VALUE="start" onClick="startJScrCap()" language="JavaScript" />
+<INPUT TYPE="button" VALUE="stop" onClick="stopJScrCap()" language="JavaScript" />
+<INPUT TYPE="button" VALUE="move" onClick="moveJScrCap()" language="JavaScript" />
+<INPUT TYPE="button" VALUE="mouse" onClick="mouseJScrCap()" language="JavaScript" />
+<INPUT TYPE="button" VALUE="set rect" onClick="setRect()" />
+
+</FORM>
+
+<SCRIPT language="JavaScript">
+function setRect(){
+document.Form1.desktop_rect.value = document.VHScreenShare.get_desktoprect();
+}
+
+function JScrCap_Event(operation, code, desc) {
+	document.Form1.events.value = "op: " + operation + ", code: " + code + ", desc: " + desc;
+}
+</SCRIPT>
+
+<p><a href="http://java.com/getjava/">Doesn't work? Install java!</a></p>
+
+</BODY>
+</HTML>

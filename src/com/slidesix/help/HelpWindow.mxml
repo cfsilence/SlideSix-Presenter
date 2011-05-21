@@ -1,0 +1,486 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init();" width="750" height="500" show="helpShown();" showCloseButton="true" verticalAlign="middle">
+	<mx:Script source="faq.as" /> 
+	<mx:Script>
+		<![CDATA[
+		import mx.rpc.events.ResultEvent;
+		import mx.collections.ArrayCollection;
+		import mx.core.Container;
+		import mx.controls.Alert;
+		import mx.events.DynamicEvent;
+		import mx.events.CloseEvent;
+		import mx.managers.PopUpManager;
+		import mx.utils.ObjectUtil;
+		
+		[Bindable] [Embed(source = 'assets/help_icon_200.png')] private var helpImg:Class;
+		[Bindable] public var faqCategories:ArrayCollection = new ArrayCollection(['all topics']);
+		[Bindable] public var contactURL:String;
+		[Bindable] public var chatLink:String;
+		[Bindable] public var screenShareURL:String;
+		[Bindable] public var showHelpAtStart:Boolean;
+		[Bindable] public var userguideURL:String;
+		
+		public var prefFile:File;
+		public var contactFrom:String;
+		public var contactFromID:int;
+		public var contactFromEmail:String;
+		public var initialView:String = 'helpMenu';
+
+		public function init():void {
+			this.addEventListener(CloseEvent.CLOSE, closeHandler);
+			helpShown();
+			
+			helpStack.addEventListener(Event.CHANGE, function():void{
+				if(helpStack.selectedChild == faq){
+					resetFAQ();
+				}
+				if(helpStack.selectedChild == contact){
+					resetContactForm();
+				}
+			});
+			
+			for(var i:int = 0; i < faqs.length; i++){
+				var theseCats:String = faqs.getItemAt(i, 0).c;
+				var theseCatsArr:Array = theseCats.split(',');
+				for(var c:int = 0; c < theseCatsArr.length; c++){
+					var thisCat:String = theseCatsArr[c];
+					if(!faqCategories.contains(thisCat)){
+						faqCategories.addItem(thisCat);
+					}
+				}
+			}
+			helpStack.addEventListener(Event.CHANGE, function(e:Event):void{
+				helpStack.childDescriptors
+			});
+		}
+		
+		public function helpShown():void{
+			setHelpView();
+			var pref:Object = getPreferences();
+			showHelpAtStart = pref.showHelpAtStart;
+		}
+		
+		public function getPreferences():Object{
+			var stream:FileStream = new FileStream();
+			stream.open(prefFile, FileMode.READ);
+			var ob:Object = stream.readObject();
+			stream.close();
+			return ob;
+		}
+		
+		public function savePreferences():void{
+			var pObj:Object = getPreferences();
+			pObj.showHelpAtStart = !showHelpAtStartInput.selected;
+			var stream:FileStream = new FileStream();
+			stream.open(prefFile, FileMode.WRITE);
+			stream.writeObject(pObj);
+			stream.close();
+			showHelpAtStartInput.visible = false;
+		}
+		
+		public function setHelpView():void{
+			getHelpView(initialView);
+		}
+		
+		public function closeHandler(e:Event):void {
+			helpStack.selectedChild = helpMenu;
+			this.visible = false;
+		}
+		
+		public function resetFAQ():void{
+			faqList.verticalScrollPosition = 0;
+			faqList.selectedIndex = -1;
+			faqList.dataProvider.filterFunction = null;
+			faqList.dataProvider.refresh();	
+			faqCategory.selectedIndex = 0;
+			faqSearchTerm.text = '';
+		}
+		
+		public function resetContactForm():void{
+			contactMsg.text = '';
+		}
+		
+		private function broadcastNeedHelpVideo():void{
+			var topic:String = helpStack.selectedChild.id;
+			var needVideoEvent:DynamicEvent = new DynamicEvent("needVideoEvent");
+ 			needVideoEvent.name = name;
+ 			needVideoEvent.topic = topic;
+ 			dispatchEvent(needVideoEvent);
+		}
+		public function getHelpView(topic:String):void{
+			helpStack.selectedIndex = helpStack.getChildIndex(helpStack.getChildByName(topic));
+		}
+		
+		public function faqFilterFunc(item:Object):Boolean {
+			var searchString:String = faqSearchTerm.text.toLowerCase();
+			var searchTopic:String = faqCategory.selectedItem.valueOf();
+			if(searchTopic != 'all topics' && searchString.length > 0){
+				return (item.q.toLowerCase().indexOf(searchString) > -1 || item.a.toLowerCase().indexOf(searchString) > -1) && item.c.toLowerCase().indexOf(searchTopic) > -1;	
+			}
+			else if(searchTopic != 'all topics' && searchString.length == 0){
+				return item.c.toLowerCase().indexOf(searchTopic) > -1;	
+			}
+			else{
+				return (item.q.toLowerCase().indexOf(searchString) > -1 || item.a.toLowerCase().indexOf(searchString) > -1);
+			}
+			 
+		}
+		
+		public function filterFAQ():void {
+			faqList.selectedIndex = -1;
+			if (faqSearchTerm.text.length || faqCategory.selectedItem.valueOf() != 'all topics') {
+				faqList.dataProvider.filterFunction = faqFilterFunc;
+				faqList.dataProvider.refresh();	
+			}
+			else {
+				faqList.dataProvider.filterFunction = null;
+				faqList.dataProvider.refresh();	
+			}
+			faqList.verticalScrollPosition = 0;
+		}
+		
+		public function validateContactForm():Array {
+			var errors:Array = new Array();
+			
+			if (!contactMsg.text.length) {
+				errors.push('Please enter your feedback.');
+			}
+			
+			return errors;
+		}
+		public function sendContactClicked(event:MouseEvent):void {
+			var e:Array = validateContactForm();
+			if (e.length > 0) {
+				var msg:String = 'Please address the following errors:\n';
+				for (var i:int = 0; i < e.length; i++) {
+					msg += '*' + e[i] + '\n';
+				}
+				Alert.show(msg, 'Attention');
+			}
+			else {
+				sendContact();
+			}
+		}
+		public function sendContact():void {
+			var p:Object = new Object();
+			p.contactFromEmail = contactFromEmail;
+			p.contactFrom = contactFrom + '(' + contactFromID + ') Via Presenter';
+			p.contactMsg = contactMsg.text;
+            contactService.send(p);
+		}
+		
+		public function contactServiceHandler(event:ResultEvent):void {
+			Alert.show('Thank you for your feedback.  We will evaluate it as soon as possible');
+			resetContactForm();
+		}
+		
+		public function goLink(u:String):void {
+			var urlRequest:URLRequest = new URLRequest(u);
+			navigateToURL(urlRequest, '_blank');	
+		}
+		
+		public function getUserGuide():void{
+			var urlRequest:URLRequest = new URLRequest(userguideURL);
+			navigateToURL(urlRequest, '_blank');	
+		}
+		
+		]]>
+	</mx:Script>
+	
+	<mx:HTTPService showBusyCursor="true" id="contactService" url="{contactURL}" resultFormat="text" result="contactServiceHandler(event)" fault="parentApplication.faultHandler(event)" />
+	
+	<mx:ViewStack id="helpStack" width="100%" height="100%" fontSize="18">
+	
+		<mx:HBox id="helpMenu" width="100%" height="100%" verticalAlign="middle">
+			<mx:HBox width="100%" height="100%" verticalAlign="middle">
+				<mx:HBox>
+					<mx:Image source="{helpImg}" width="200" />
+				</mx:HBox>
+				<mx:HBox width="100%">
+					<mx:VBox width="100%">
+						<mx:Label text="SlideSix Presenter Help" fontWeight="bold" />
+						<mx:Label text="Please choose a topic to learn more..." fontSize="14" />
+						<mx:HBox width="100%">
+							<mx:Button id="gettingStartedBtn" width="50%" label="Getting Started" color="#ffffff" click="getHelpView('gettingStarted')" />
+							<mx:Button id="uploadHelpBtn" width="50%" label="Uploading" color="#ffffff" click="getHelpView('uploadHelp')" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Button id="presentingLiveHelpBtn" width="50%" label="Presenting Live" color="#ffffff" click="getHelpView('presentingLiveHelp')" />
+							<mx:Button id="presentingVirtualHelpBtn" width="50%" label="Presenting Virtually" color="#ffffff" click="getHelpView('presentingVirtualHelp')" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Button id="broadcastHelpBtn" width="50%" label="Broadcasting" color="#ffffff" click="getHelpView('broadcastHelp')" />
+							<mx:Button id="chatHelpBtn" width="50%" label="Chat" color="#ffffff" click="getHelpView('chatHelp')" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<!--<mx:Button id="screenshareHelpBtn" width="50%" label="Screensharing" color="#ffffff" click="getHelpView('screenshareHelp')" />-->
+							<mx:Button id="twitterHelpBtn" width="50%" label="Twitter Monitor" color="#ffffff" click="getHelpView('twitterHelp')" />
+							<mx:Button id="workingOfflineHelpBtn" width="50%" label="Working Offline" color="#ffffff" click="getHelpView('workingOfflineHelp')" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Button id="optionsHelpBtn" width="50%" label="Setting Preferences" color="#ffffff" click="getHelpView('optionsHelp')" />
+							<mx:Button width="50%" label="FAQ" color="#ffffff" click="getHelpView('faq')" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Button width="50%" label="Contact Us" color="#ffffff" click="getHelpView('contact')" />
+							<mx:Button width="50%" label="User Guide" color="#ffffff" click="getUserGuide()" />
+						</mx:HBox>
+						<mx:HBox width="100%">
+							<mx:Button width="{optionsHelpBtn.width}" label="Exit Help" color="#ffffff" click="closeHandler(new Event(Event.CLOSE))" />
+							<mx:Spacer width="50%" />
+						</mx:HBox>
+						<!--<mx:HBox width="100%">
+							<mx:Spacer width="50%" />
+							<mx:Button width="50%" label="Exit Help" color="#ffffff" click="closeHandler(new Event(Event.CLOSE))" />
+						</mx:HBox>-->
+					</mx:VBox>
+				</mx:HBox>
+			</mx:HBox>
+		</mx:HBox>
+		
+		<mx:HBox id="gettingStarted" label="Getting Started" width="100%" height="370" verticalAlign="middle" fontSize="16" show="gettingStartedContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+				<mx:Spacer height="100%" />
+				<mx:Image source="@Embed('assets/presentation.png')" />
+				<mx:Spacer height="100%" />
+				<mx:CheckBox id="showHelpAtStartInput" label="Don't show help at startup" toolTip="Check here if you do not want the help menu displayed after you log in" selected="{!showHelpAtStart}" visible="{showHelpAtStart &amp;&amp; helpStack.selectedChild != faq &amp;&amp; helpStack.selectedChild != helpMenu}" click="savePreferences()" />
+			</mx:VBox>
+			<mx:VBox width="100%" height="370" verticalAlign="middle" id="gettingStartedContent">
+				<mx:Text width="428" text="Getting Started" fontWeight="bold" />
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>The SlideSix Presenter application was designed to be easy to navigate.  The application is divided into seven different 'panels':</p><ul><li>Presentations</li><li>Live Broadcast</li><li>Chat</li><li>Slide</li><li>Notes</li><li>Twitter Monitor</li><li>Slides</li></ul><p>You can customize the way that the application looks at any time by clicking on the bars containing arrows located at each corner (top, left, bottom, right) of the application.  For example, clicking on the top bar toggle the visibility of the 'Presentations' panel.</p><p>To get started just double click on a presentation thumbnail in the Presentation panel located at the top of the application.  If you do not see any thumbnails in the panel then you do not currently have any public (non password protected) presentations associated with the SlideSix account that you logged in with.  Not to worry, you can upload directly to SlideSix from within the application.  Click 'Help Menu' below or use the 'Previous/Next' buttons to learn more about the SlideSix Presenter.</p>]]>
+					</mx:htmlText>
+				</mx:Text>
+			</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="uploadHelp" label="Uploading Presentations" width="100%" height="370" verticalAlign="middle" fontSize="16" show="uploadHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+				<mx:Image source="@Embed('assets/thumb_up.png')" />
+			</mx:VBox>
+			<mx:VBox width="100%" height="370" verticalAlign="middle" id="uploadHelpContent">
+				<mx:Text width="428" text="Uploading Presentations" fontWeight="bold" />
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>There are two ways to queue a presentation to be uploaded to SlideSix using the SlideSix Presenter application.  The first way is to click the 'Upload' button located in the 'Presentations' panel (at the top of the application).  This will display your operating systems standard file choose dialog that will allow you to select a presentation file (PPT, PPS, PDF, ODP, SXI) that you would like to upload to SlideSix.  Once you have chosen a file to upload a new dialog will be displayed within the application that will allow you to enter a title, description and tags for your presentation.  When you are satisfied with your entries click 'Upload Now' to begin uploading.  The second way to queue a presentation for upload is to simply 'drag and drop' a valid file into the 'Presentations' panel which will initiate the same dialog for entering presentation details.</p>
+						]]>
+					</mx:htmlText>
+				</mx:Text>
+			</mx:VBox>
+		</mx:HBox>
+				
+		<mx:HBox id="presentingLiveHelp" label="Presenting To A Live Audience" width="100%" height="370" verticalAlign="middle" fontSize="16" show="presentingLiveHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="@Embed('assets/user.png')" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="presentingLiveHelpContent">
+					<mx:Text width="428" text="Presenting To A Live Audience" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>The SlideSix Presenter enables you to present your SlideSix Presentations to a live audience just as you would with any other presentation software but offers features not found in any other program such as the ability to simultaneously broadcast to a dedicated web channel and monitor Twitter backchannels in real time.  To present your content to a live audience just double click on a presentation thumbnail in the 'Presentations' panel to load the individual slides.  Once the slides have been loaded the first slide in the presentation is automatically displayed in the 'Slide' panel.  A thumbnail preview of each slide is displayed in the 'Slides' panel at the bottom of the application.  To present the material in full screen mode click 'Enter Presenter Mode' from the bottom of the 'Slide' panel.  To navigate in presenter mode you can use the following shortcuts.</p><br><p>Advance To Next Slide:</p><ul><li>Left mouse click</li><li>Space Bar</li><li>Enter</li><li>Right Arrow</li><li>Down Arrow</li><li>'N'</li><li>Page Down</li></ul><br><p>Advance To Previous Slide:</p><ul><li>Left Arrow</li><li>Up Arrow</li><li>Backspace</li><li>Delete</li><li>'P'</li><li>Page Up</li></ul><br><p>If the SlideSix Presenter application detects multiple monitors connected to your computer you will first be prompted to choose a screen where your slide will be displayed.  This feature allows you to view your slide notes, Twitter backchannel and anything else from your primary monitor while showing only your slide to your live audience.  To navigate to a different slide in your presentation you can click the 'Next Slide' and 'Previou Slide' buttons from within the 'Slide' panel, choose a slide thumbnail within the 'Slides' panel.  You also have the option of single clicking on the full screen slide itself to advance to the next slide or right clicking on the slide to display a short menu of navigation options.  To close presenter mode you can press 'Esc' on your keyboard (when presenting with only one monitor), right clicking on the slide in presenter mode and selecting 'End Show' or clicking 'Exit Presenter Mode' at the bottom of the 'Slide' panel.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="presentingVirtualHelp" label="Presenting To A Virtual Audience" width="100%" height="370" verticalAlign="middle" fontSize="16" show="presentingVirtualHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="@Embed('assets/radio_mast.png')" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="presentingVirtualHelpContent">
+					<mx:Text width="428" text="Presenting To A Virtual Audience" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>Each user is given a unique and dedicated web page on SlideSix to present their slide material, broacast audio/video and communicate with other participants via live chat.</p><p>You can toggle the visibility of the 'Live Broadcast' panel by clicking on the down arrow within the panel header.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+					<mx:Text text="Your dedicated room is located at:" />
+					<mx:HBox width="100%">
+						<mx:TextInput id="chatLinkThree" text="{chatLink}" width="50%" editable="true" />
+						<mx:Button click="System.setClipboard(chatLinkThree.text); Alert.show('Copied to clipboard');" label="Copy" height="{chatLinkThree.height}" />
+						<mx:Button label="Go" click="goLink(chatLinkThree.text)" height="{chatLinkThree.height}" />
+					</mx:HBox>
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>This dedicated web page allows you to virtually present your material over the web.  You can take advantage of this feature in conjunction with other features to present both to a live and virtual audience at the same time.  To learn more about the individual features for virtual presenting see the help topics 'Broadcasting' and 'Chat'.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="broadcastHelp" label="Broadcasting Audio/Video" width="100%" height="370" verticalAlign="middle" fontSize="16" show="broadcastHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+				<mx:Image source="@Embed('assets/multimedia.png')" />
+			</mx:VBox>
+			<mx:VBox width="100%" height="370" verticalAlign="middle" id="broadcastHelpContent">
+				<mx:Text width="428" text="Broadcasting Audio/Video" fontWeight="bold" />
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>Each user is given a unique and dedicated web page on SlideSix to present their slide material, broacast audio/video and communicate with other participants via live chat.</p>]]>
+					</mx:htmlText>
+				</mx:Text>
+				<mx:Text text="Your dedicated room is located at:" />
+				<mx:HBox width="100%">
+					<mx:TextInput id="chatLinkOne" text="{chatLink}" width="50%" editable="true" />
+					<mx:Button click="System.setClipboard(chatLinkOne.text); Alert.show('Copied to clipboard');" label="Copy" height="{chatLinkOne.height}" />
+					<mx:Button label="Go" click="goLink(chatLinkOne.text)" height="{chatLinkOne.height}" />
+				</mx:HBox>
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>To broadcast audio and or video you first must set your preferred camera and microphone.  To set a preferred cam and mic click 'Options' from within the 'Presentations' panel and select the 'Broadcast' tab within the options dialog.  Choose the web camera and microphone from the appropriate drop downs and click 'Save'.  Close the options dialog by clicking the 'x' in the top right corner.</p><p>Once you have set your cam and mic you can click 'Broadcast' from within the 'Live Broadcast' panel to begin streaming your audio/video to your dedicated room.  If you'd rather just stream audio you can uncheck the 'Use Cam' checkbox.  At any time you can check your current broadcast status by viewing the status monitor in the 'Presentations' panel.  A green ball next to 'Broadcasting' means you are currently streaming, while a red ball means you are not.</p><p><b>Note:</b>  You have the option of creating a password protected room.  To do this you must log in to the <a href="http://slidesix.com/slideManager" target="_blank"><font color="#0000ff">SlideSix Management Console</font></a> on the web.  Within the web based Management Console click 'Profile' and enter and confirm your password.  Only give this password to those you trust.</p>]]>
+					</mx:htmlText>
+				</mx:Text>
+			</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="chatHelp" label="Chatting" width="100%" height="370" verticalAlign="middle" fontSize="16" show="chatHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+				<mx:Image source="@Embed('assets/group_chat.png')" />
+			</mx:VBox>
+			<mx:VBox width="100%" height="370" verticalAlign="middle" id="chatHelpContent">
+				<mx:Text width="428" text="Chatting" fontWeight="bold" />
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>Each user is given a unique and dedicated web page on SlideSix to present their slide material, broacast audio/video and communicate with other participants via live chat.</p><p>You can toggle the visibility of the 'Live Broadcast' panel by clicking on the down arrow within the panel header.</p>]]>
+					</mx:htmlText>
+				</mx:Text>
+				<mx:Text text="Your dedicated room is located at:" />
+				<mx:HBox width="100%">
+					<mx:TextInput id="chatLinkTwo" text="{chatLink}" width="50%" editable="true" />
+					<mx:Button click="System.setClipboard(chatLinkTwo.text); Alert.show('Copied to clipboard');" label="Copy" height="{chatLinkTwo.height}" />
+					<mx:Button label="Go" click="goLink(chatLinkTwo.text)" height="{chatLinkTwo.height}" />
+				</mx:HBox>
+				<mx:Text fontSize="14" width="436">
+					<mx:htmlText>
+						<![CDATA[<p>To participate in live chat and see a list of who is currently viewing your presentation material on the web click 'Join Chat' at the bottom of the 'Chat' panel.  Once you are logged in you will see a list of chat particpants, a chat display area and a text box to enter and send a chat message.  To exit the chat at any time click 'Exit Chat'.  To copy a link to your dedicated chat room click the 'Copy Link' button.</p><p>At any time you can check whether or not you are logged in to chat by viewing the status monitor in the 'Presentations' panel.  A green ball next to 'Chatting' means you are currently logged in to chat, while a red ball means you are not.</p><p><b>Note:</b>  You have the option of creating a password protected room.  To do this you must log in to the <a href="http://slidesix.com/slideManager" target="_blank"><font color="#0000ff">SlideSix Management Console</font></a> on the web.  Within the web based Management Console click 'Profile' and enter and confirm your password.  Only give this password to those you trust.</p>]]>
+					</mx:htmlText>
+				</mx:Text>
+			</mx:VBox>
+		</mx:HBox>
+		
+		<!--<mx:HBox id="screenshareHelp" label="Screen Sharing" width="100%" height="370" verticalAlign="middle" fontSize="16" show="screenshareHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="{helpImg}" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="screenshareHelpContent">
+					<mx:Text width="428" text="Screen Sharing" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>You can share the contents of your screen with attendees by downloading a simple application from the following URL and running it (requires Java).</p><p><b><i>Please note:</i></b>  This URL changes with every session that you broadcast.  Please do not save and try to reuse the screen sharing application.  Instead, please obtain a new link.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+					<mx:HBox width="100%">
+						<mx:TextInput id="screenshareLink" text="{screenShareURL}" width="50%" editable="true" />
+						<mx:Button click="System.setClipboard(screenshareLink.text); Alert.show('Copied to clipboard');" label="Copy" height="{screenshareLink.height}" />
+						<mx:Button label="Go" click="goLink(screenshareLink.text)" height="{screenshareLink.height}" />
+					</mx:HBox>
+					<mx:Text text="Screen Sharing is broadcast to your dedicated room:" />
+					<mx:HBox width="100%">
+						<mx:TextInput id="chatLinkFour" text="{chatLink}" width="50%" editable="true" />
+						<mx:Button click="System.setClipboard(chatLinkFour.text); Alert.show('Copied to clipboard');" label="Copy" height="{chatLinkFour.height}" />
+						<mx:Button label="Go" click="goLink(chatLinkFour.text)" height="{chatLinkFour.height}" />
+					</mx:HBox>
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>The Java application will give you the ability to select the portion of your screen to share and start/stop sharing.  When sharing your screen any slide contents are replaced with your screen share.  To show your slide contents you must stop screen sharing.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>-->
+		<mx:HBox id="twitterHelp" label="Monitoring A Twitter Backchannel" width="100%" height="370" verticalAlign="middle" fontSize="16" show="twitterHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="{helpImg}" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="twitterHelpContent">
+					<mx:Text width="428" text="Monitoring A Twitter Backchannel" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>Twitter is a powerful tool for instant presentation feedback.  The SlideSix Presenter application gives you the ability to monitor a Twitter 'backchannel' during your presentation.  To use the Twitter Monitor you must first enter your Twitter credentials within the Options menu.  After you have entered and saved your Twitter credentials you can start monitoring a particular search term or hash tag by entering it in the text box at the top of the Twitter Monitor panel and clicking 'Listen'.  The Twitter Monitor will begin fetching Tweets that match the given search term or hashtag and will automatically refresh the stream about every 60 seconds.  You can stop the automatic refresh by clicking 'Mute' or manually refresh the stream by clicking 'Refresh'.  To share a particular Tweet with your live audience you can select the Tweet and drag it onto the Slide panel (or click 'Show') while in presenter mode.  A large window will overlay the Tweet contents on top of your current slide.  To remove the Tweet click on the 'x' in the top right corner of the Tweet display window or click 'Hide'.</p><p>You can change the search term/hashtag at any time by entering a new term.  If you find the Twitter Monitor to be distracting during your presentation you can minimize it by clicking on the arrow within the panel header.  To restore the panel just click the arrow again.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="workingOfflineHelp" label="Working Offline" width="100%" height="370" verticalAlign="middle" fontSize="16" show="workingOfflineHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="@Embed('assets/network_offline.png')" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="workingOfflineHelpContent">
+					<mx:Text width="428" text="Working Offline" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>The SlideSix Presenter application gives you the ability to save presentations to your computer so that you can present the material at any time regardless of whether or not you are connected to the internet.  To save a presentation offline just single click on a presentation thumbnail in the 'Presentations' panel and click 'Save Offline'.  Since larger presentations (those over 25 slides) tend to take several minutes to completely save to your computer you will be asked to confirm that you would like to proceed.  Once you confirm a new dialog will appear that shows the current status of the offline save process.  When all slides have been downloaded and saved to your computer you can close the offline save dialog.</p><p>To view all of the presentations you have saved offline click 'Work Offline'.  The 'Presentations' panel will be loaded with a thumbnail preview of each presentation that you have saved to your computer.  To work with an offline presentation you simply double click on the presentation thumbnail just as you would an online presentation.  You can check whether or not the current presentation is online or offline by viewing the status area within the 'Presentations' panel.  A green ball next to 'Presentation' means the current presentation is being viewed from SlideSix.com and a red ball means that the presentation is being viewed from the version saved to your computer.</p><p>When working with offline presentations you may still utilize online functionality like Live Broadcasating, Chat and the Twitter Monitor if you have connectivity to the internet.  You can check your network connectivity at any time by checking the status area within the 'Presentations' panel.  A green ball next to 'Network' means that internet connectivity has been verified and a red ball means that no internet connection is currently available.</p><p>Please note that offline presentations are specific to a given SlideSix account.  In other words, if you use the SlideSix Presenter application to work with several SlideSix accounts then the offline presentations will be kept separate from each other.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="optionsHelp" label="Managing Your Preferences" width="100%" height="370" verticalAlign="middle" fontSize="16" show="optionsHelpContent.verticalScrollPosition = 0;">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="@Embed('assets/gear_icon.png')" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle" id="optionsHelpContent">
+					<mx:Text width="428" text="Managing Your Preferences" fontWeight="bold" />
+					<mx:Text fontSize="14" width="436">
+						<mx:htmlText>
+							<![CDATA[<p>To manage options and preferences for the SlideSix Presenter application click 'Options' from the 'Presentations' panel.  The options dialog lets you enter and save information related to the Twitter Monitor feature, preferred microphone and camera to use when broadcasting live audio/video as well as other settings such as the size of font to be used for the 'Notes' panel.</p>]]>
+						</mx:htmlText>
+					</mx:Text>
+				</mx:VBox>
+		</mx:HBox>
+		<mx:HBox id="contact" label="Contact Us" width="100%" height="370" verticalAlign="middle" fontSize="16">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="370">
+					<mx:Image source="@Embed(source='assets/email_icon.png')" />
+				</mx:VBox>
+				<mx:VBox width="100%" height="370" verticalAlign="middle">
+					<mx:Text width="428" text="Contact Us" fontWeight="bold" />
+					<mx:TextArea id="contactMsg" width="100%" height="100%" />
+					<mx:HBox styleName="formContainer" width="100%" horizontalAlign="left">
+						<mx:Button id="goIdeaScaleBtn" label="SlideSix On IdeaScale" click="goLink('http://slidesix.ideascale.com')" toolTip="Enter Feedback at IdeaScale!" />
+						<mx:Spacer width="100%" />
+						<mx:Button id="sendFeedbackBtn" label="Send" click="sendContactClicked(event)" toolTip="Send feedback to us, we love it!" />
+					</mx:HBox>
+				</mx:VBox>
+		</mx:HBox>
+		
+		<mx:HBox id="faq" width="100%" height="100%" verticalAlign="middle" fontSize="16">
+			<mx:VBox width="200" horizontalAlign="center" verticalAlign="middle" height="100%">
+				<!--<mx:Text width="200" text="Frequently Asked Questions" fontWeight="bold" />-->
+				<mx:Image source="{helpImg}" />
+			</mx:VBox>
+			<mx:VBox width="100%" height="370" id="faqBox">
+				<mx:HBox width="100%">
+					<mx:TextInput width="100%" id="faqSearchTerm" keyUp="filterFAQ()" valueCommit="filterFAQ()"/>
+					<mx:ComboBox id="faqCategory" dataProvider="{faqCategories}" change="filterFAQ()" />
+					<mx:Button id="clearFAQSearchBtn" label="Clear" enabled="{faqSearchTerm.text.length &gt; 0 ? true : false}" click="faqSearchTerm.text = '';" />
+				</mx:HBox>
+				<mx:List height="100%" width="100%" dataProvider="{faqs}" id="faqList" click="aDisplay.verticalScrollPosition = 0;">
+					<mx:itemRenderer>
+						<mx:Component>
+							<mx:HBox width="100%" borderStyle="none">
+								<mx:Text text="{data.q}" />
+							</mx:HBox>
+						</mx:Component>
+					</mx:itemRenderer>
+				</mx:List>
+				<mx:TextArea editable="false" width="100%" height="100%" htmlText="{faqList.selectedItem.a}" id="aDisplay" />
+			</mx:VBox>
+		</mx:HBox>
+		
+	</mx:ViewStack>
+	
+	<mx:ControlBar width="100%" fontSize="18" height="50">
+		
+		<mx:Button id="goToHelpBtn" label="Help Menu" visible="{helpStack.selectedChild != helpMenu}" click="helpStack.selectedChild = helpMenu;" />
+		<mx:Spacer width="100%" />
+
+		<mx:Text id="faqCount" visible="{helpStack.selectedChild == faq}" textAlign="right" width="{helpStack.selectedChild == faq ? 190 : 0}" text="{faqList.dataProvider.length.toString() != '1' ? faqList.dataProvider.length + ' Topics Found' : faqList.dataProvider.length + ' Topic Found'}" />
+
+		<mx:HBox id="navBtns" visible="{helpStack.selectedChild != faq &amp;&amp; helpStack.selectedChild != helpMenu}" width="{helpStack.selectedChild != faq &amp;&amp; helpStack.selectedChild != helpMenu ? 250 : 0}" horizontalAlign="right">
+			<mx:Button id="prevTopic" label="Previous Topic" width="120" enabled="{helpStack.selectedIndex &gt; 1}" toolTip="{prevTopic.enabled ? HBox(helpStack.getChildAt(helpStack.selectedIndex - 1)).label : ''}" click="helpStack.selectedIndex = helpStack.selectedIndex - 1" />
+			<mx:Button id="nextTopic" label="Next Topic" width="120" enabled="{helpStack.selectedIndex &lt; helpStack.numChildren - 2}" toolTip="{nextTopic.enabled ? HBox(helpStack.getChildAt(helpStack.selectedIndex + 1)).label : ''}" click="helpStack.selectedIndex = helpStack.selectedIndex + 1" />
+		</mx:HBox>
+		
+	</mx:ControlBar>
+</mx:TitleWindow>

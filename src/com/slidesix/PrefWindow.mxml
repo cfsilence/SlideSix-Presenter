@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:TitleWindow xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="init();" width="400" height="350" 
+	showCloseButton="true" title="Options" verticalAlign="middle" show="setup();">
+	<mx:Script>
+		<![CDATA[
+		import mx.rpc.xml.SimpleXMLDecoder;
+		import mx.rpc.xml.SimpleXMLEncoder;
+		import mx.collections.ArrayCollection;
+		import mx.events.DynamicEvent;
+		import mx.utils.ObjectUtil;
+		import mx.rpc.events.FaultEvent;
+		import mx.events.CloseEvent;
+		import mx.managers.PopUpManager;
+		import mx.rpc.events.ResultEvent;
+		import mx.controls.Alert;
+		import mx.utils.ObjectUtil;
+		
+		public var isDirty:Boolean = false;
+		public var broadcastOptionsChangedEvent:DynamicEvent;
+		public var notesTextSizeChangedEvent:DynamicEvent;
+		public var chatTextSizeChangedEvent:DynamicEvent;
+		public var uname:String;
+		public var cams:Array = Camera.names;
+		public var mics:Array = Microphone.names;
+		public var userguideURL:String;
+		
+		[Bindable]
+		public var availScreens:Array;
+		[Bindable]
+		public var preferences:Object;
+		[Bindable]
+		public var currentVersion:String;
+		 
+		public var prefFile:File;
+		
+		public function init():void {
+			this.addEventListener(CloseEvent.CLOSE, closeHandler);
+			stage.addEventListener(KeyboardEvent.KEY_DOWN, makeDirty);
+			broadcastOptionsChangedEvent = new DynamicEvent("broadcastOptionsChangedEvent");
+ 			broadcastOptionsChangedEvent.name = name;
+			notesTextSizeChangedEvent = new DynamicEvent("notesTextSizeChangedEvent");
+			notesTextSizeChangedEvent.name = name;
+			chatTextSizeChangedEvent = new DynamicEvent("chatTextSizeChangedEvent");
+			chatTextSizeChangedEvent.name = name;
+			availScreens = Screen.screens;
+			
+			var prefDirectory:File = File.applicationStorageDirectory;
+			prefFile = prefDirectory.resolvePath(uname + '/user-preferences.s6');
+			
+			if(!prefFile.exists){
+				savePref(new MouseEvent(MouseEvent.CLICK));
+			}
+			
+			preferences = readPref();
+		}
+		
+		/* public function serializeForm():void{
+			//create an object from the values
+			var rObj:Object = new Object();
+			rObj.twitterUsername = twitterUsername.text.length ? twitterUsername.text : '';
+			rObj.twitterPassword = twitterPassword.text.length ? twitterPassword.text : '';
+			rObj.preferredCamera = preferredCamera.selectedIndex != -1 ? preferredCamera.selectedIndex : 0;
+			rObj.preferredMicrophone = preferredMicrophone.selectedIndex != -1 ? preferredMicrophone.selectedIndex : 0;
+			rObj.notesTextSize = notesTextSize.value;
+			preferences = rObj;
+		} */
+		
+		public function makeDirty(e:Event):void{
+			isDirty = true;
+		}
+		
+		public function setup():void{
+			//load shit here
+			this.status = '';
+			preferences = readPref();
+			isDirty = false;
+		}
+		
+		public function closeHandler(e:Event):void {
+			if(isDirty){
+				Alert.show('Are you sure?  You haven\'t saved your changes.', 'Hold up...', 3, this, confirmClose);
+			}
+			else{
+				PopUpManager.removePopUp(this);			
+			}
+		}
+		
+		public function confirmClose(e:CloseEvent):void{
+			if (e.detail == Alert.YES) {
+				PopUpManager.removePopUp(this);		
+			}
+		}
+		
+		public function savePref(e:MouseEvent):void {
+			this.status = 'Saving...';
+			var stream:FileStream = new FileStream();
+			stream.open(prefFile, FileMode.WRITE);
+			stream.writeObject(preferences);
+			stream.close();
+			isDirty = false;
+			dispatchEvent(new CloseEvent(CloseEvent.CLOSE));
+		}
+		
+		public function readPref():Object{
+			var stream:FileStream = new FileStream();
+			stream.open(prefFile, FileMode.READ);
+			var ob:Object = stream.readObject();
+			stream.close();
+			return ob;
+		}
+		
+		public function needContactWindow():void{
+			var needContactWindowEvent:DynamicEvent = new DynamicEvent("needContactWindowEvent");
+ 			needContactWindowEvent.name = name;
+ 			dispatchEvent(needContactWindowEvent);
+		}
+		
+		public function refreshMicAndCamLists():void{
+			cams = Camera.names;
+			mics = Microphone.names;
+			preferredCamera.dataProvider.refresh();
+			preferredMicrophone.dataProvider.refresh();
+		}
+		public function goUserGuide():void {
+			var urlRequest:URLRequest = new URLRequest(userguideURL);
+			navigateToURL(urlRequest, '_blank');	
+		}
+		]]>
+	</mx:Script>
+	<mx:Style>
+		.tab{
+			paddingBottom: 10;
+			paddingTop: 10;
+			paddingLeft: 10;
+			paddingRight: 10;
+		}
+	</mx:Style>
+	
+	<mx:TabNavigator id="prefTabNav" width="100%" height="100%">
+		<mx:VBox id="twitterOptionsTab" width="100%" label="Twitter" horizontalAlign="center" styleName="tab">
+			<mx:HBox width="100%">
+				<mx:Text text="Username" width="95"  textAlign="right"/>
+				<mx:TextInput id="twitterUsername" text="{preferences.twitterUsername}" change="preferences.twitterUsername = twitterUsername.text;" width="215" />
+			</mx:HBox>
+			<mx:HBox width="100%">
+				<mx:Text text="Password" width="95"  textAlign="right"/>
+				<mx:TextInput id="twitterPassword" displayAsPassword="true" text="{preferences.twitterPassword}" change="preferences.twitterPassword = twitterPassword.text;" width="215" />
+			</mx:HBox>
+		</mx:VBox>
+		<mx:VBox id="broadCastOptionsTab" width="100%" label="Broadcast" horizontalAlign="center" styleName="tab">
+			<mx:HBox width="100%" verticalAlign="middle">
+				<mx:Text text="Camera" width="95"  textAlign="right"/>
+				<mx:ComboBox id="preferredCamera" dataProvider="{cams}" selectedIndex="{preferences.preferredCamera}" width="215" change="preferences.preferredCamera = preferredCamera.selectedIndex; dispatchEvent(broadcastOptionsChangedEvent)" />
+			</mx:HBox>
+			<mx:HBox width="100%" verticalAlign="middle">
+				<mx:Text text="Microphone" width="95"  textAlign="right"/>
+				<mx:ComboBox id="preferredMicrophone" dataProvider="{mics}" selectedIndex="{preferences.preferredMicrophone}" width="215" change="preferences.preferredMicrophone = preferredMicrophone.selectedIndex; dispatchEvent(broadcastOptionsChangedEvent)" />
+			</mx:HBox>
+			<mx:HBox width="100%" verticalAlign="middle" visible="false">
+				<mx:Text text="" width="95"  textAlign="right"/>
+				<mx:Button id="refreshCamAndMicListsBtn" label="Refresh" toolTip="Click this button to refresh the list of cameras and microphones.  This is useful if you connect a device after this list is populated and do not see it in the drop down." click="refreshMicAndCamLists()" />
+			</mx:HBox>
+		</mx:VBox>
+		<mx:VBox label="Preferences" width="100%" height="100%" horizontalAlign="center" styleName="tab">
+			<mx:HBox width="100%" verticalAlign="middle">
+				<mx:Text text="Notes Text Size" width="95"  textAlign="right"/>
+				<mx:NumericStepper id="notesTextSize" width="215" value="{preferences.notesTextSize}" minimum="10" maximum="28" stepSize="2" click="makeDirty(event)" change="preferences.notesTextSize = notesTextSize.value; dispatchEvent(notesTextSizeChangedEvent);" />
+			</mx:HBox>
+			<mx:HBox width="100%" verticalAlign="middle">
+				<mx:Text text="" width="95"  textAlign="right"/>
+				<mx:CheckBox id="showHelpAtStartInput" width="226" label="Show Help Window At Startup?" selected="{preferences.showHelpAtStart}" click="makeDirty(event)" change="preferences.showHelpAtStart = showHelpAtStartInput.selected;" />
+			</mx:HBox>
+			<mx:HBox width="100%" verticalAlign="middle" visible="false">
+				<mx:Text text="Chat Text Size" width="95"  textAlign="right"/>
+				<mx:NumericStepper id="chatTextSize" width="215" value="12" minimum="10" maximum="28" stepSize="2" focusIn="makeDirty(event)" />
+			</mx:HBox>
+		</mx:VBox>
+		<mx:VBox label="About" width="100%" height="100%" horizontalAlign="center" styleName="tab" paddingBottom="10" paddingLeft="10" paddingRight="10" paddingTop="10">
+			<mx:Text width="100%" fontSize="14" text="SlideSix Presenter" />
+			<mx:Text width="100%" text="{'Version: ' + currentVersion}" />
+			<mx:Text width="100%">
+				<mx:htmlText>
+					<![CDATA[Copyright 2009, <a href='http://cfsilence.com' target='_blank'><font color='#2200CC'>Sharp Interactive, LLC</font></a>]]>
+				</mx:htmlText>
+			</mx:Text>
+			<mx:HBox width="100%" horizontalAlign="left">
+				<mx:Button id="getContactDialog" label="Contact Us" click="needContactWindow()"  width="159"/>
+				<mx:Button id="getUserGuide" label="User Guide" click="goUserGuide()"  width="159"/>
+			</mx:HBox>
+		</mx:VBox>
+	</mx:TabNavigator>
+	<mx:ControlBar id="prefControlBar">
+		<mx:Spacer width="100%" />
+		<mx:Button id="savePrefBtn" label="Save" click="savePref(event)" /> 
+		<mx:Button id="cancelPrevBtn" label="Cancel" click="closeHandler(event)" />
+	</mx:ControlBar>
+</mx:TitleWindow>
